@@ -99,7 +99,7 @@ def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
     return testvecs
 
 def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, brightness_threshold, chord_params):
-    dirtymap = np.empty(u.shape[0])
+    dirtymap = np.empty(u.shape[0]*wavelengths.shape[0])
     cuda_dirtymap_function(
         unpackArraytoStruct (u.flatten()),
         unpackArraytoStruct (wavelengths),

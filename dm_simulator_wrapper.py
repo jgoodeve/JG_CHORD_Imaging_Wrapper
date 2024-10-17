@@ -1,8 +1,9 @@
 import numpy as np
+import os
 import ctypes
 
-dms_lib = ctypes.CDLL("dms.so")
-cuda_dirtymap_function = dms_lib.dirtymap
+dms_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__),"dms.so"))
+cuda_dirtymap_function = dms_lib.dirtymap_caller
 
 class floatArray(ctypes.Structure):
     _fields_ = [("p",ctypes.POINTER((ctypes.c_float))),("l",ctypes.c_uint)]
@@ -64,7 +65,7 @@ def generate_spectra (n,nchannels, center_theta, center_phi, angular_offset_scal
         spectra[i] = brightness[i] * gaussian(x, centers[i], widths[i])
     
     randomphi = rng.uniform(center_phi-angular_offset_scale_phi, center_phi+angular_offset_scale_phi, size=n)
-    randomtheta = rng.uniform(center_theta-angular_offset_scale_theta, angular_offset_scale_theta, size=n) #yeah I know this is not supposed to be uniform. This function is just for demonstration purposes. It probably doesn't work at the north pole or something.
+    randomtheta = rng.uniform(center_theta-angular_offset_scale_theta, center_theta+angular_offset_scale_theta, size=n) #yeah I know this is not supposed to be uniform. This function is just for demonstration purposes. It probably doesn't work at the north pole or something.
     us_output = np.empty([n,3])
     for i in range(n):
         us_output[i] = ang2vec(randomtheta[i],randomphi[i])
@@ -107,7 +108,7 @@ def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, bright
         unpackArraytoStruct(source_spectra.flatten()),
         brightness_threshold,
         chord_params,
-        unpackArraytoStruct (dirtymap)
+        dirtymap.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
     )
     return dirtymap
 
@@ -129,7 +130,7 @@ if __name__ == "__main__":
     chord_thetas = np.asarray([np.deg2rad(90-49.322)])
     cp = chordParams(thetas = unpackArraytoStruct(chord_thetas),
                     initial_phi_offset = np.deg2rad(10),
-                     m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0
+                     m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=20)
     
     u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2)

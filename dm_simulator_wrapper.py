@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import ctypes
+from numpy.ctypeslib import ndpointer
 
 dms_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__),"dms.so"))
 cuda_dirtymap_function = dms_lib.dirtymap_caller
@@ -14,15 +15,16 @@ def unpackArraytoStruct (arr):
 class chordParams(ctypes.Structure):
     _fields_ = [("thetas",floatArray),
                 ("initial_phi_offset",ctypes.c_float),
-                ("m2", ctypes.c_ushort),
-                ("L1", ctypes.c_double),
-                ("L2", ctypes.c_double),
-                ("CHORD_zenith_dec", ctypes.c_double),
-                ("D", ctypes.c_double),
-                ("delta_tau", ctypes.c_double),
+		("m1", ctypes.c_uint),
+                ("m2", ctypes.c_uint),
+                ("L1", ctypes.c_float),
+                ("L2", ctypes.c_float),
+                ("CHORD_zenith_dec", ctypes.c_float),
+                ("D", ctypes.c_float),
+                ("delta_tau", ctypes.c_float),
                 ("time_samples", ctypes.c_uint)]
 
-cuda_dirtymap_function.argtypes = [floatArray, floatArray, floatArray, floatArray, ctypes.c_float, chordParams, ctypes.POINTER(ctypes.c_float)]
+cuda_dirtymap_function.argtypes = [floatArray, floatArray, floatArray, floatArray, ctypes.c_float, chordParams, ndpointer(dtype=ctypes.c_float)]
 #u, wavelengths, source_u, source_spectra, brightness_threshold, chord params, dm
 
 def ang2vec (theta,phi):
@@ -100,15 +102,15 @@ def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
     return testvecs
 
 def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, brightness_threshold, chord_params):
-    dirtymap = np.empty(u.shape[0]*wavelengths.shape[0])
+    dirtymap = np.empty(u.shape[0]*wavelengths.shape[0], dtype = np.float32)
     cuda_dirtymap_function(
         unpackArraytoStruct (u.flatten()),
         unpackArraytoStruct (wavelengths),
         unpackArraytoStruct (source_u.flatten()),
         unpackArraytoStruct(source_spectra.flatten()),
-        brightness_threshold,
+        ctypes.c_float(brightness_threshold),
         chord_params,
-        dirtymap.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        dirtymap
     )
     return dirtymap
 
@@ -133,7 +135,7 @@ if __name__ == "__main__":
                      m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=20)
     
-    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2)
+    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
 
     dirtymap = dirtymap_simulator_wrapper (u, f, source_us, spectra, 0.01, cp)
-    np.save(dirtymap,"simulated dirtymap")
+    np.save("simulated dirtymap", dirtymap)

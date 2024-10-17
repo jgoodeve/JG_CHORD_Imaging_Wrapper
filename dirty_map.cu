@@ -1,6 +1,8 @@
 //compiling line: nvcc --shared -o dms.so --compiler-options -fPIC dirty_map.cu
 #include <cuda_runtime.h>
 #include <math.h>       /* sin, cos, fmod, fabs, asin, atan2 */
+#include <stdio.h>
+#include <iostream>
 
 #define PI 3.14159265358979323846
 #define omega 2*PI/86400 //earth angular velocity in rads/second
@@ -14,8 +16,8 @@ struct chordParams
 {
     floatArray thetas;
     float initial_phi_offset; //amount that the calculation starts away from each source
-    unsigned short m1; //north south number of dishes
-    unsigned short m2; //east west
+    unsigned int m1; //north south number of dishes
+    unsigned int m2; //east west
     float L1; // north osuth dish separation
     float L2; //east west
     float CHORD_zenith_dec;
@@ -189,7 +191,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     cudaMalloc(&d_dm, sizeof(float)*npixels*wavelengths.l);
 
     dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u, d_wavelengths, d_source_positions, d_source_spectra, brightness_threshold, d_cp, d_dm);
-    cudaMemcpy(dm, d_dm, sizeof(float) * npixels*wavelengths.l, cudaMemcpyDeviceToHost);
+    cudaMemcpy(dm, d_dm, sizeof(float)*npixels*wavelengths.l, cudaMemcpyDeviceToHost);
 
     cudaFree(d_u.p);
     cudaFree(d_wavelengths.p);

@@ -103,7 +103,7 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
 
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
-    if (blockIdx.x*32 + threadIdx.x < u.l * 3)
+    if (blockIdx.x*32 + threadIdx.x < u.l / 3)
     {
         //calculating the relevant CHORD vectors for each dither direction
         float * chord_pointing = new float [3*cp.thetas.l];
@@ -123,6 +123,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
         }
 
         float * threadu = u.p + blockIdx.x*32 + threadIdx.x;
+	if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("u: (%f, %f, %f), chord u: (%f,%f,%f)\n", threadu[0], threadu[1], threadu[2], chord_pointing[0], chord_pointing[1], chord_pointing[2]);
         for (unsigned int l = 0; l < wavelengths.l; l++)
         {
             float usum = 0;
@@ -150,12 +151,15 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                             float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);
 
                             time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
+			    if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("bsq_source, bsqu, and sinsqu parts: %e %e %e %e\n", Bsq_source, Bsq_u, sin_sq_ratio(cp.m1,cdir1), sin_sq_ratio(cp.m2,cdir2));
+			    if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Time sum at middle pixel: %e\n", time_sum);
                         }
                     }
                 }
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
             dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] = usum;
+            if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Total sum at middle pixel: %e\n", usum);
         }
     delete chord_pointing;
     delete dir1_proj_vec;

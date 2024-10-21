@@ -10,6 +10,7 @@ class floatArray(ctypes.Structure):
     _fields_ = [("p",ctypes.POINTER((ctypes.c_float))),("l",ctypes.c_uint)]
 
 def unpackArraytoStruct (arr):
+    assert(arr.dtype==ctypes.c_float or arr.dtype==np.float32)
     return floatArray(arr.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), arr.size)
 
 class chordParams(ctypes.Structure):
@@ -102,6 +103,7 @@ def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
     return testvecs
 
 def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, brightness_threshold, chord_params):
+    assert(source_u.shape[0] == source_spectra.shape[0])
     dirtymap = np.empty(u.shape[0]*wavelengths.shape[0], dtype = np.float32)
     cuda_dirtymap_function(
         unpackArraytoStruct (u.flatten()),
@@ -117,8 +119,10 @@ def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, bright
 omega = 2*np.pi/(3600*24)
 
 if __name__ == "__main__":
-    nf = 2
-    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf)
+    #nf = 2
+    #f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf)
+    #wavelengths = f*1E6/sol
+    test_wavelengths = np.asarray([0.21], dtype=ctypes.c_float)
 
     base_theta = np.deg2rad(90-49.322)
     base_phi = 0
@@ -127,15 +131,18 @@ if __name__ == "__main__":
     extent1 = np.deg2rad(5.0/60 * nx)
     extent2 = np.deg2rad(5.0/60 * ny)
 
-    spectra, source_us = generate_spectra (40,nf, base_theta, base_phi, extent2, extent1)
+    #spectra, source_us = generate_spectra (1,nf, base_theta, base_phi, extent2, extent1)
+    test_spectra = np.asarray([6.0],dtype=ctypes.c_float)
+    test_source_us = np.asarray([ang2vec(base_theta,0)], dtype=ctypes.c_float)
 
-    chord_thetas = np.asarray([np.deg2rad(90-49.322)])
+    chord_thetas = np.asarray([np.deg2rad(90-49.322)], dtype=ctypes.c_float)
     cp = chordParams(thetas = unpackArraytoStruct(chord_thetas),
                     initial_phi_offset = np.deg2rad(10),
                      m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=20)
     
-    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
+    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(ctypes.c_float)
+    print("halfway u in python:", u[u.shape[0]//2])
 
-    dirtymap = dirtymap_simulator_wrapper (u, f, source_us, spectra, 0.01, cp)
-    np.save("simulated dirtymap", dirtymap)
+    dirtymap = dirtymap_simulator_wrapper (u, test_wavelengths, test_source_us, test_spectra, 0.01, cp)
+    np.save("simulated_dirtymap", dirtymap)

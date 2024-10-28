@@ -128,8 +128,8 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
         }
 
         float * threadu = u.p + blockIdx.x*32 + threadIdx.x;
-	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 886) printf("u at pixel 45886: (%f,%f,%f)\n", threadu[0], threadu[1],threadu[2]);
-	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 886) printf("chord_pointing at pixel 45886: (%f,%f,%f)\n", chord_pointing[0], chord_pointing[1], chord_pointing[2]);
+	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("u at pixel 45886: (%f,%f,%f)\n", threadu[0], threadu[1],threadu[2]);
+	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("chord_pointing at pixel 45886: (%f,%f,%f)\n", chord_pointing[0], chord_pointing[1], chord_pointing[2]);
 	for (unsigned int l = 0; l < wavelengths.l; l++)
         {
             float usum = 0;
@@ -166,7 +166,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
             dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] = usum;
-            if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 886) printf("Total sum at pixel 45886: %e from device ID %d\n", usum, deviceID);
+            if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("Total sum at pixel 45886: %e from device ID %d\n", usum, deviceID);
         }
     delete chord_pointing;
     delete dir1_proj_vec;
@@ -210,11 +210,11 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-        unsigned int npixels_per_gpu = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - (deviceCount-1) * blocksPerGPU * 32;
+        unsigned int npixels_per_gpu = ((gpuId+1) * blocksPerGPU * 32 <= npixels) ? blocksPerGPU * 32 : npixels - (deviceCount-1) * blocksPerGPU * 32;
 	std::cout << "npixels_per_gpu for gpu " << gpuId << ": " << npixels_per_gpu << std::endl;
 	floatArray u_for_gpu;
 	u_for_gpu.p = u.p + gpuId * blocksPerGPU * 32;
-	u_for_gpu.l = npixels_per_gpu;
+	u_for_gpu.l = npixels_per_gpu*3;
 	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
@@ -237,7 +237,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	chordParams d_cp = cp;
 	d_cp.thetas = d_thetas[gpuId];
 
-	dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId]);
+	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId]);
 	//cudaDeviceSynchronize();
 
 	std::cout << "Ending loop for deviceId: " << deviceId << std::endl;
@@ -252,7 +252,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-        unsigned int npixels_per_gpu = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - (deviceCount-1) * blocksPerGPU * 32;
+        unsigned int npixels_per_gpu = ((gpuId+1) * blocksPerGPU * 32 <= npixels) ? blocksPerGPU * 32 : npixels - (deviceCount-1) * blocksPerGPU * 32;
         cudaMemcpyAsync(dm + gpuId * blocksPerGPU * 32 * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
         cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);

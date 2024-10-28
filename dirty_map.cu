@@ -196,33 +196,33 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     unsigned int blocksToCover = (npixels+31)/32;
     unsigned int blocksPerGPU = (blocksToCover+3)/4;
 
-    float * d_dm_quarter [4]; //array that holds pointers to the 4 output arrays
-    floatArray d_u[4];
-    floatArray d_wavelengths[4];
-    floatArray d_source_positions[4];
-    floatArray d_source_spectra[4];
-    floatArray d_thetas[4];
+    float * d_dm [deviceCount]; //array that holds pointers to the deviceCount output arrays
+    floatArray d_u[deviceCount];
+    floatArray d_wavelengths[deviceCount];
+    floatArray d_source_positions[deviceCount];
+    floatArray d_source_spectra[deviceCount];
+    floatArray d_thetas[deviceCount];
 
-    for (int gpuId = 0; gpuId < 4; gpuId++)
+    for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-        unsigned int npixels_quarter = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - 3 * blocksPerGPU * 32;
-	floatArray u_quarter;
-	u_quarter.p = u.p + gpuId * blocksPerGPU * 32;
-	u_quarter.l = npixels_quarter;
-	copyFloatArrayToDevice(u_quarter,d_u[gpuId]);
+        unsigned int npixels_per_gpu = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - (deviceCount-1) * blocksPerGPU * 32;
+	floatArray u_for_gpu;
+	u_for_gpu.p = u.p + gpuId * blocksPerGPU * 32;
+	u_for_gpu.l = npixels_per_gpu;
+	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
 	copyFloatArrayToDevice(source_spectra,d_source_spectra[gpuId]);
 	copyFloatArrayToDevice(cp.thetas,d_thetas[gpuId]);
 
         //allocating the return array
-        cudaMalloc(&(d_dm_quarter[gpuId]), sizeof(float)*npixels_quarter*wavelengths.l);
+        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths.l);
     }
 
-    //launching the kernels on the 4 GPUs
-    for (int gpuId = 0; gpuId < 4; gpuId++)
+    //launching the kernels on all the GPUs
+    for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaError_t cudaSetDeviceError;
 	cudaSetDeviceError = cudaSetDevice(gpuId);
@@ -233,7 +233,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	chordParams d_cp = cp;
 	d_cp.thetas = d_thetas[gpuId];
 
-	dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm_quarter[gpuId]);
+	dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId]);
 	//cudaDeviceSynchronize();
 
 	std::cout << "Ending loop for deviceId: " << deviceId << std::endl;
@@ -245,13 +245,13 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     cudaError_t kernel_err = cudaGetLastError();
     if (kernel_err != cudaSuccess) std::cout << "Error from kernel: " << kernel_err << std::endl;
 
-    //copying over the data from the 4 GPUs when they're done running
-    for (int gpuId = 0; gpuId < 4; gpuId++)
+    //copying over the data from the GPUs when they're done running
+    for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-	unsigned int npixels_quarter = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - 3 * blocksPerGPU * 32;
-        cudaMemcpyAsync(dm + gpuId * blocksPerGPU * 32 * wavelengths.l, d_dm_quarter[gpuId], sizeof(float)*npixels_quarter*wavelengths.l, cudaMemcpyDeviceToHost);
-        cudaFree(d_dm_quarter[gpuId]);
+        unsigned int npixels_per_gpu = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - (deviceCount-1) * blocksPerGPU * 32;
+        cudaMemcpyAsync(dm + gpuId * blocksPerGPU * 32 * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
+        cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);
 	cudaFree(d_source_positions[gpuId].p);

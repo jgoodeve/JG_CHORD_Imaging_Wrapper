@@ -1,5 +1,6 @@
 //compiling line: nvcc --shared -o dms.so --compiler-options -fPIC dirty_map.cu
 #include <cuda_runtime.h>
+#include <cuda.h>
 #include <math.h>       /* sin, cos, fmod, fabs, asin, atan2 */
 #include <stdio.h>
 #include <iostream>
@@ -103,7 +104,11 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
 
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
-    if (blockIdx.x*32 + threadIdx.x < u.l / 3)
+    //printf("%d ", blockIdx.x*32 + threadIdx.x);
+    int deviceID;
+    cudaGetDevice(&deviceID);
+    if (blockIdx.x*32 + threadIdx.x == 0) printf("hello, I'm running from device %d\n", deviceID);
+    if ((blockIdx.x*32 + threadIdx.x)*3 < u.l)
     {
         //calculating the relevant CHORD vectors for each dither direction
         float * chord_pointing = new float [3*cp.thetas.l];
@@ -123,12 +128,13 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
         }
 
         float * threadu = u.p + blockIdx.x*32 + threadIdx.x;
-	if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("u: (%f, %f, %f), chord u: (%f,%f,%f)\n", threadu[0], threadu[1], threadu[2], chord_pointing[0], chord_pointing[1], chord_pointing[2]);
-        for (unsigned int l = 0; l < wavelengths.l; l++)
+	for (unsigned int l = 0; l < wavelengths.l; l++)
         {
+         	    if (blockIdx.x*32 + threadIdx.x == 0) printf("inside wavelengths loop from device %d\n", deviceID);
             float usum = 0;
             for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
             {
+    		if (blockIdx.x*32 + threadIdx.x == 0) printf("source spectrum: %f from device ID %d\n", source_spectra.p[s*wavelengths.l + l], deviceID);
                 float time_sum = 0;
                 if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
                 {
@@ -151,15 +157,15 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                             float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);
 
                             time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
-			    if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("bsq_source, bsqu, and sinsqu parts: %e %e %e %e\n", Bsq_source, Bsq_u, sin_sq_ratio(cp.m1,cdir1), sin_sq_ratio(cp.m2,cdir2));
-			    if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Time sum at middle pixel: %e\n", time_sum);
+			    //if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("bsq_source, bsqu, and sinsqu parts: %e %e %e %e\n", Bsq_source, Bsq_u, sin_sq_ratio(cp.m1,cdir1), sin_sq_ratio(cp.m2,cdir2));
+			    //if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Time sum at middle pixel: %e\n", time_sum);
                         }
                     }
                 }
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
             dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] = usum;
-            if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Total sum at middle pixel: %e\n", usum);
+            if (blockIdx.x*32 + threadIdx.x == u.l/3/2) printf("Total sum at middle pixel: %e from device ID %d\n", usum, deviceID);
         }
     delete chord_pointing;
     delete dir1_proj_vec;
@@ -171,37 +177,94 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 inline void copyFloatArrayToDevice (const floatArray host_array, floatArray & device_array)
 {
     device_array.l = host_array.l;
-    cudaMalloc(&device_array.p, sizeof(float) * host_array.l);
-    cudaMemcpy(device_array.p, host_array.p, sizeof(float) * host_array.l, cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaSuccess;
+    err = cudaMalloc(&device_array.p, sizeof(float) * host_array.l);
+    if (err != cudaSuccess) {fprintf(stderr, "Failed to allocate memory for array (error code %s)!\n", cudaGetErrorString(err)); exit(EXIT_FAILURE);}
+
+    err = cudaMemcpyAsync(device_array.p, host_array.p, sizeof(float) * host_array.l, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {fprintf(stderr, "Failed to copy data to device array (error code %s)!\n", cudaGetErrorString(err)); exit(EXIT_FAILURE);}
 }
 
 extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
+    int deviceCount;
+    cudaGetDeviceCount(&deviceCount);
+    std::cout << "Device count: " << deviceCount << std::endl;
     unsigned int npixels = u.l/3;
-    //copying data over to the device
-    floatArray d_u;
-    copyFloatArrayToDevice(u,d_u);
-    floatArray d_wavelengths;
-    copyFloatArrayToDevice(wavelengths,d_wavelengths);
-    floatArray d_source_positions;
-    copyFloatArrayToDevice(source_positions, d_source_positions);
-    floatArray d_source_spectra;
-    copyFloatArrayToDevice(source_spectra,d_source_spectra);
-    chordParams d_cp = cp;
-    floatArray d_thetas;
-    copyFloatArrayToDevice(cp.thetas,d_thetas);
-    d_cp.thetas = d_thetas;
-    float * d_dm;
-    cudaMalloc(&d_dm, sizeof(float)*npixels*wavelengths.l);
+    //there are 4 GPUs, and each of them cover a quarter of the pixels
+    unsigned int blocksToCover = (npixels+31)/32;
+    unsigned int blocksPerGPU = (blocksToCover+3)/4;
 
-    dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u, d_wavelengths, d_source_positions, d_source_spectra, brightness_threshold, d_cp, d_dm);
-    cudaMemcpy(dm, d_dm, sizeof(float)*npixels*wavelengths.l, cudaMemcpyDeviceToHost);
+    float * d_dm_quarter [4]; //array that holds pointers to the 4 output arrays
+    floatArray d_u[4];
+    floatArray d_wavelengths[4];
+    floatArray d_source_positions[4];
+    floatArray d_source_spectra[4];
+    floatArray d_thetas[4];
 
-    cudaFree(d_u.p);
-    cudaFree(d_wavelengths.p);
-    cudaFree(d_source_positions.p);
-    cudaFree(d_source_spectra.p);
-    cudaFree(d_cp.thetas.p);
-    cudaFree(d_dm);
+    for (int gpuId = 0; gpuId < 4; gpuId++)
+    {
+	cudaSetDevice(gpuId);
+	//copying data over to the device
+        unsigned int npixels_quarter = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - 3 * blocksPerGPU * 32;
+	floatArray u_quarter;
+	u_quarter.p = u.p + gpuId * blocksPerGPU * 32;
+	u_quarter.l = npixels_quarter;
+	copyFloatArrayToDevice(u_quarter,d_u[gpuId]);
+	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
+	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
+	copyFloatArrayToDevice(source_spectra,d_source_spectra[gpuId]);
+	copyFloatArrayToDevice(cp.thetas,d_thetas[gpuId]);
+
+        //allocating the return array
+        cudaMalloc(&(d_dm_quarter[gpuId]), sizeof(float)*npixels_quarter*wavelengths.l);
+    }
+
+    //launching the kernels on the 4 GPUs
+    for (int gpuId = 0; gpuId < 4; gpuId++)
+    {
+	cudaError_t cudaSetDeviceError;
+	cudaSetDeviceError = cudaSetDevice(gpuId);
+	std::cout << "Error returned from cudasetdevice: " << cudaSetDeviceError << std::endl;
+	int deviceId;
+	cudaGetDevice(&deviceId);
+
+	chordParams d_cp = cp;
+	d_cp.thetas = d_thetas[gpuId];
+
+	dirtymap_kernel<<<(npixels+31)/32,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm_quarter[gpuId]);
+	//cudaDeviceSynchronize();
+
+	std::cout << "Ending loop for deviceId: " << deviceId << std::endl;
+    }
+    printf("got here");
+
+    cudaDeviceSynchronize();
+
+    cudaError_t kernel_err = cudaGetLastError();
+    if (kernel_err != cudaSuccess) std::cout << "Error from kernel: " << kernel_err << std::endl;
+
+    //copying over the data from the 4 GPUs when they're done running
+    for (int gpuId = 0; gpuId < 4; gpuId++)
+    {
+	cudaSetDevice(gpuId);
+	unsigned int npixels_quarter = (gpuId * blocksPerGPU * 32 <= u.l) ? blocksPerGPU * 32 : u.l - 3 * blocksPerGPU * 32;
+        cudaMemcpyAsync(dm + gpuId * blocksPerGPU * 32 * wavelengths.l, d_dm_quarter[gpuId], sizeof(float)*npixels_quarter*wavelengths.l, cudaMemcpyDeviceToHost);
+        cudaFree(d_dm_quarter[gpuId]);
+	cudaFree(d_u[gpuId].p);
+	cudaFree(d_wavelengths[gpuId].p);
+	cudaFree(d_source_positions[gpuId].p);
+	cudaFree(d_source_spectra[gpuId].p);
+	cudaFree(d_thetas[gpuId].p);
+    }
 }
+}
+
+int main ()
+{
+	size_t free, total;
+	cudaFree(0);
+	cudaMemGetInfo(&free,&total);
+	std::cout << "free: " << free << " total: " << total << std::endl;
 }

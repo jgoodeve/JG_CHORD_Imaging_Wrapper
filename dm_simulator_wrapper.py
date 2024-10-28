@@ -106,7 +106,6 @@ def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, bright
     assert(source_u.shape[0] == source_spectra.shape[0])
     assert(wavelengths.shape[0] == source_spectra.shape[1])
     dirtymap = np.empty(u.shape[0]*wavelengths.shape[0], dtype = np.float32)
-    print("Dirtymap array size:", dirtymap.size)
     cuda_dirtymap_function(
         unpackArraytoStruct (u),
         unpackArraytoStruct (wavelengths),
@@ -145,8 +144,6 @@ if __name__ == "__main__":
     
     u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(ctypes.c_float)
     #u = u[:89000]
-    print("(Python) u at pixel 45886:", u[45886])
-    print("(Python CHORD u)", ang2vec(np.deg2rad(90-49.322), 0))
 
     dirtymap = dirtymap_simulator_wrapper (u, test_wavelengths, test_source_us, test_spectra, 0.01, cp)
     np.save("simulated_dirtymap", dirtymap)

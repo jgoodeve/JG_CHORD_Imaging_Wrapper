@@ -107,7 +107,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
     //printf("%d ", blockIdx.x*32 + threadIdx.x);
     int deviceID;
     cudaGetDevice(&deviceID);
-    if (blockIdx.x*32 + threadIdx.x == 0) printf("hello, I'm running from device %d\n", deviceID);
+    //if (blockIdx.x*32 + threadIdx.x == 0) printf("hello, I'm running from device %d\n", deviceID);
     if ((blockIdx.x*32 + threadIdx.x)*3 < u.l)
     {
         //calculating the relevant CHORD vectors for each dither direction
@@ -127,28 +127,30 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
             L1s[k] = cp.L1*cos(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[k]);
         }
 
-        float * threadu = u.p + blockIdx.x*32 + threadIdx.x;
-	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("u at pixel 45886: (%f,%f,%f)\n", threadu[0], threadu[1],threadu[2]);
-	if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("chord_pointing at pixel 45886: (%f,%f,%f)\n", chord_pointing[0], chord_pointing[1], chord_pointing[2]);
+        float * threadu = u.p + (blockIdx.x*32 + threadIdx.x)*3;
+	if (blockIdx.x*32 + threadIdx.x == 862) printf("u at pixel 45886: (%f,%f,%f) from device ID %d\n", threadu[0], threadu[1],threadu[2], deviceID);
+	//if (blockIdx.x*32 + threadIdx.x == 862) printf("chord_pointing at pixel 45886: (%f,%f,%f)\n", chord_pointing[0], chord_pointing[1], chord_pointing[2]);
 	for (unsigned int l = 0; l < wavelengths.l; l++)
         {
             float usum = 0;
             for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
             {
-                float time_sum = 0;
+		float time_sum = 0;
                 if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
                 {
-		    float source_phi = atan2(source_positions.p[s*3+1],source_positions.p[s*3]);
-		    float initial_tau = -(source_phi-cp.initial_phi_offset)/omega; //we want it to start computing phi_offset away from the source
-                    for (unsigned int k = 0; k < cp.thetas.l; k++)
+     		    float source_phi = atan2(source_positions.p[s*3+1],source_positions.p[s*3]);
+		    float initial_travelangle = source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
+                    if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 886) printf("initial travelangle: %f\n", initial_travelangle /PI*180);
+		    for (unsigned int k = 0; k < cp.thetas.l; k++)
                     {
                         for (unsigned int j = 0; j < cp.time_samples; j++)
                         {
-                            float tau = initial_tau+j*cp.delta_tau;
+                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
+			    if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 886) printf("offset phi: %f\n", travelangle/PI*180);
                             float u_rot [3];
-                            rotate(threadu, u_rot, tau*omega);
+                            rotate(threadu, u_rot, travelangle);
                             float source_rot [3];
-                            rotate(source_positions.p+3*s, source_rot, tau*omega);
+                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
                             float cdir1 = PI*L1s[k]/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec+3*k);
                             float cdir2 = PI*cp.L2 /wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec+3*k);
@@ -166,7 +168,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
             dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] = usum;
-            if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("Total sum at pixel 45886: %e from device ID %d\n", usum, deviceID);
+            //if (deviceID == 1 && blockIdx.x*32 + threadIdx.x == 862) printf("Total sum at pixel 45886: %e from device ID %d\n", usum, deviceID);
         }
     delete chord_pointing;
     delete dir1_proj_vec;
@@ -189,7 +191,7 @@ inline void copyFloatArrayToDevice (const floatArray host_array, floatArray & de
 
 extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
-    printf("(cpu) u at pixel 45886: (%f,%f,%f)\n", u.p[45886*3], u.p[45886*3+1],u.p[45886*3+2]);
+    printf("initial_phi_offset cpu: %f\n", cp.initial_phi_offset);
 
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
@@ -213,8 +215,9 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
         unsigned int npixels_per_gpu = ((gpuId+1) * blocksPerGPU * 32 <= npixels) ? blocksPerGPU * 32 : npixels - (deviceCount-1) * blocksPerGPU * 32;
 	std::cout << "npixels_per_gpu for gpu " << gpuId << ": " << npixels_per_gpu << std::endl;
 	floatArray u_for_gpu;
-	u_for_gpu.p = u.p + gpuId * blocksPerGPU * 32;
+	u_for_gpu.p = u.p + (gpuId * blocksPerGPU * 32)*3;
 	u_for_gpu.l = npixels_per_gpu*3;
+	printf("The u 862 away from the pointer at %d (%f,%f,%f) (GPU %d)\n",(gpuId * blocksPerGPU * 32)*3, u_for_gpu.p[862*3],u_for_gpu.p[862*3+1],u_for_gpu.p[862*3+2],gpuId);
 	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
@@ -235,6 +238,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaGetDevice(&deviceId);
 
 	chordParams d_cp = cp;
+	printf("d_cp ipo: %f\n", d_cp.initial_phi_offset);
 	d_cp.thetas = d_thetas[gpuId];
 
 	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId]);

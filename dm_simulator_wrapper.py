@@ -130,8 +130,8 @@ if __name__ == "__main__":
     base_phi = 0
     nx = 300
     ny = 300
-    extent1 = np.deg2rad(5.0/60 * nx)
-    extent2 = np.deg2rad(5.0/60 * ny)
+    extent1 = np.deg2rad(3) #np.deg2rad(5.0/60 * nx)
+    extent2 = np.deg2rad(3) #np.deg2rad(5.0/60 * ny)
 
     #spectra, source_us = generate_spectra (1,nf, base_theta, base_phi, extent2, extent1)
     test_spectra = np.asarray([[6.0]],dtype=ctypes.c_float)
@@ -141,10 +141,12 @@ if __name__ == "__main__":
     cp = chordParams(thetas = unpackArraytoStruct(chord_thetas),
                     initial_phi_offset = np.deg2rad(10),
                      m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
-                    delta_tau = np.deg2rad(0.5)/omega, time_samples=20)
+                    delta_tau = np.deg2rad(0.5)/omega, time_samples=41)
     
     u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(ctypes.c_float)
     #u = u[:89000]
+    print("(Python) u at pixel 45886:", u[45886])
+    print("(Python CHORD u)", ang2vec(np.deg2rad(90-49.322), 0))
 
     dirtymap = dirtymap_simulator_wrapper (u, test_wavelengths, test_source_us, test_spectra, 0.01, cp)
     np.save("simulated_dirtymap", dirtymap)

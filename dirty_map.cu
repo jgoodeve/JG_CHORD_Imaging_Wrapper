@@ -108,6 +108,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
     //cudaGetDevice(&deviceID);
     if ((blockIdx.x*32 + threadIdx.x)*3 < u.l)
     {
+	if (blockIdx.x*32 + threadIdx.x == 0) printf("chord theta is %f\n", cp.thetas.p[0]);
         //calculating the relevant CHORD vectors for each dither direction
         float * chord_pointing = new float [3*cp.thetas.l];
         float * dir1_proj_vec = new float [3*cp.thetas.l]; //north/south chord direction
@@ -158,7 +159,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                 }
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
-            dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] = usum;
+            dm[(blockIdx.x*32 + threadIdx.x)*wavelengths.l + l] += usum;
         }
     delete chord_pointing;
     delete dir1_proj_vec;
@@ -238,12 +239,12 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaSetDevice(gpuId);
         unsigned int npixels_per_gpu = ((gpuId+1) * blocksPerGPU * 32 <= npixels) ? blocksPerGPU * 32 : npixels - (deviceCount-1) * blocksPerGPU * 32;
         cudaMemcpyAsync(dm + gpuId * blocksPerGPU * 32 * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
-        cudaFree(d_dm[gpuId]);
-	cudaFree(d_u[gpuId].p);
-	cudaFree(d_wavelengths[gpuId].p);
-	cudaFree(d_source_positions[gpuId].p);
-	cudaFree(d_source_spectra[gpuId].p);
-	cudaFree(d_thetas[gpuId].p);
+        //cudaFree(d_dm[gpuId]);
+	//cudaFree(d_u[gpuId].p);
+	//cudaFree(d_wavelengths[gpuId].p);
+	//cudaFree(d_source_positions[gpuId].p);
+	//cudaFree(d_source_spectra[gpuId].p);
+	//cudaFree(d_thetas[gpuId].p);
     }
 }
 }

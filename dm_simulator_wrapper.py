@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import ctypes
+import time
 from numpy.ctypeslib import ndpointer
 
 dms_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__),"dms.so"))
@@ -122,9 +123,10 @@ def dirtymap_simulator_wrapper (u, wavelengths, source_u, source_spectra, bright
 omega = 2*np.pi/(3600*24)
 
 if __name__ == "__main__":
-    nf = 16
-    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf, dtype=ctypes.c_float)
-    wavelengths = f*1E6/sol
+    t1 = time.time()
+    nf = 128
+    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf, dtype=ctypes.c_float)[::-1]
+    wavelengths = sol*1e3/(f*1e6)
     #test_wavelengths = np.asarray([0.21,0.212], dtype=ctypes.c_float)
 
     base_theta = np.deg2rad(90-49.322)
@@ -134,7 +136,7 @@ if __name__ == "__main__":
     extent1 = np.deg2rad(6) #np.deg2rad(5.0/60 * nx)
     extent2 = np.deg2rad(6) #np.deg2rad(5.0/60 * ny)
 
-    spectra, source_us = generate_spectra (2,nf, base_theta, base_phi, extent2, extent1)
+    spectra, source_us = generate_spectra (200,nf, base_theta, base_phi, extent2, extent1)
     #test_spectra = np.asarray([[6.0, 3.0]],dtype=ctypes.c_float)
     #test_source_us = np.asarray([ang2vec(base_theta,0)], dtype=ctypes.c_float)
 
@@ -148,4 +150,6 @@ if __name__ == "__main__":
     #u = u[:89000]
 
     dirtymap = dirtymap_simulator_wrapper (u, wavelengths, source_us, spectra, 0.01, cp)
-    np.save("simulated_dirtymap", dirtymap)
+    np.savez("simulated_dirtymap.npz", dirtymap=dirtymap, frequencies=f)
+    t2 = time.time()
+    print("Dirtymap simulator took", t2-t1, "seconds")

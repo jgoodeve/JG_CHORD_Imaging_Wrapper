@@ -239,7 +239,12 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 
     //launching the kernels on all the GPUs
     //on p100s, I want to launch ~7168 threads, or 224 blocks
-    unsigned int blocksPerGPU = smallest_remainder(200, 250, pixSegsPerGPU);
+    //on V100s, I want to launch ~10240 threads, or 320 blocks
+    //let's generalize this to work with any GPU
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(deviceProp);
+    int approxBlocksToLaunch = deviceProp.multiProcessorCount * 4;
+    unsigned int blocksPerGPU = smallest_remainder(approxBlocksToLaunch-25, approxBlocksToLaunch+25, pixSegsPerGPU);
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);

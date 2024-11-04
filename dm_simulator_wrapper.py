@@ -131,10 +131,10 @@ if __name__ == "__main__":
 
     base_theta = np.deg2rad(90-49.322)
     base_phi = 0
-    nx = 300
-    ny = 300
-    extent1 = np.deg2rad(6) #np.deg2rad(5.0/60 * nx)
-    extent2 = np.deg2rad(6) #np.deg2rad(5.0/60 * ny)
+    nx = 600
+    ny = 150
+    extent1 = np.deg2rad(12) #np.deg2rad(5.0/60 * nx)
+    extent2 = np.deg2rad(3) #np.deg2rad(5.0/60 * ny)
 
     spectra, source_us = generate_spectra (200,nf, base_theta, base_phi, extent2, extent1)
     #test_spectra = np.asarray([[6.0, 3.0]],dtype=ctypes.c_float)

@@ -242,7 +242,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     //on V100s, I want to launch ~10240 threads, or 320 blocks
     //let's generalize this to work with any GPU
     cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(deviceProp);
+    cudaGetDeviceProperties(&deviceProp, 0);
     int approxBlocksToLaunch = deviceProp.multiProcessorCount * 4;
     unsigned int blocksPerGPU = smallest_remainder(approxBlocksToLaunch-25, approxBlocksToLaunch+25, pixSegsPerGPU);
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)

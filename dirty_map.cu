@@ -139,7 +139,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	                if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
 	                {
 	     		    float source_phi = atan2(source_positions.p[s*3+1],source_positions.p[s*3]);
-			    float initial_travelangle = source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
+			    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
 			    for (unsigned int k = 0; k < cp.thetas.l; k++)
 	                    {
 	                        for (unsigned int j = 0; j < cp.time_samples; j++)
@@ -207,6 +207,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     cudaGetDeviceCount(&deviceCount);
     //std::cout << "Device count: " << deviceCount << std::endl;
     unsigned int npixels = u.l/3;
+    if (npixels <= 32) deviceCount = 1; //this is a debugging mode
     //there are 4 GPUs, and each of them cover a quarter of the pixels
     //we're calling a pixSeg (pixel segment) a group of 32 pixels
     unsigned int pixSegsToCover = (npixels+31)/32;

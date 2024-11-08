@@ -219,6 +219,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     floatArray d_source_spectra[deviceCount];
     floatArray d_thetas[deviceCount];
 
+    if (npixels <= 32) deviceCount = 1; //this is a debugmode thing to get it to run on only 1 gpu.
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);

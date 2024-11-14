@@ -6,8 +6,8 @@
 #include <climits>  /*UINT_MAX*/
 #include <iostream>
 
-#define PI 3.14159265358979323846
-#define omega 2*PI/86400 //earth angular velocity in rads/second
+constexpr float PI = 3.14159265358979323846f;
+constexpr float omega = float(2*PI/86400); //earth angular velocity in rads/second
 
 struct floatArray {
     float * p;
@@ -64,7 +64,7 @@ __device__ inline float crossmag(const float v1 [3], const float v2 [3])
 __device__ float B_sq (const float alpha, const float wavelength, const float D)
 {
     float alphaprime = PI*D*sin(alpha)/wavelength;
-    if (alphaprime <= 1E-8 && alphaprime >= -1E-8)
+    if (alphaprime <= 1F-8 && alphaprime >= -1F-8)
         return (j0f(alphaprime)-jnf(2,alphaprime))*(j0f(alphaprime)-jnf(2,alphaprime)); //l'Hopital's
     else
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
@@ -78,7 +78,7 @@ __device__ inline float Bsq_from_vecs (const float v1 [3], const float v2 [3], c
     {
         //we want to deal with the arccos instiblity by using the cross product formula instead
         float delta_ang;
-        if (dp < 0.99) delta_ang = std::acos(dp);    
+        if (dp < 0.99f) delta_ang = std::acos(dp);    
         else 
         {
             delta_ang = std::asin(crossmag(v1,v2));
@@ -103,7 +103,8 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
     else return sin(m*x)*sin(m*x)/(sin(x)*sin(x));
 }
 
-__global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock)
+__global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, 
+	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock)
 {
     //int deviceID;
     //cudaGetDevice(&deviceID);
@@ -271,12 +272,12 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaSetDevice(gpuId);
         unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * 32 <= npixels) ? pixSegsPerGPU * 32 : npixels - (deviceCount-1) * pixSegsPerGPU * 32;
         cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * 32 * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
-        //cudaFree(d_dm[gpuId]);
-	//cudaFree(d_u[gpuId].p);
-	//cudaFree(d_wavelengths[gpuId].p);
-	//cudaFree(d_source_positions[gpuId].p);
-	//cudaFree(d_source_spectra[gpuId].p);
-	//cudaFree(d_thetas[gpuId].p);
+        cudaFree(d_dm[gpuId]);
+	cudaFree(d_u[gpuId].p);
+	cudaFree(d_wavelengths[gpuId].p);
+	cudaFree(d_source_positions[gpuId].p);
+	cudaFree(d_source_spectra[gpuId].p);
+	cudaFree(d_thetas[gpuId].p);
     }
 }
 }

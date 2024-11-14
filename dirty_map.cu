@@ -64,7 +64,7 @@ __device__ inline float crossmag(const float v1 [3], const float v2 [3])
 __device__ float B_sq (const float alpha, const float wavelength, const float D)
 {
     float alphaprime = PI*D*sin(alpha)/wavelength;
-    if (alphaprime <= 1F-8 && alphaprime >= -1F-8)
+    if (alphaprime <= float(1E-8) && alphaprime >= float(-1E-8))
         return (j0f(alphaprime)-jnf(2,alphaprime))*(j0f(alphaprime)-jnf(2,alphaprime)); //l'Hopital's
     else
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
@@ -99,7 +99,7 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
     x = fabs(x); // 0 < x < pi
     x = (x > PI/2) ? PI-x : x; //0 < x < pi/2
     
-    if (fabs(x) < 1E-9) return m*m*cos(m*x)*cos(m*x)/(cos(x)*cos(x));
+    if (fabs(x) < float(1E-9)) return m*m*cos(m*x)*cos(m*x)/(cos(x)*cos(x));
     else return sin(m*x)*sin(m*x)/(sin(x)*sin(x));
 }
 

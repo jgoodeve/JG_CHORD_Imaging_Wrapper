@@ -8,6 +8,7 @@
 #include <cassert> /* assert */
 
 #define MAX_DITHERS 5
+#define THREADS_PER_BLOCK 128
 
 constexpr float PI = 3.14159265358979323846f;
 constexpr float omega = float(2*PI/86400); //earth angular velocity in rads/second
@@ -42,7 +43,7 @@ __device__ inline void cross (const float v1 [3], const float v2 [3], float outv
 {
     outvec[0] = v1[1]*v2[2]-v1[2]*v2[1];
     outvec[1] = v1[2]*v2[0]-v1[0]*v2[2];
-    outvec[2] = v1[0]*v2[1]-v1[1]*v2[0]; 
+    outvec[2] = v1[0]*v2[1]-v1[1]*v2[0];
 }
 
 __device__ inline void rotate (const float v [3], float outvec [3], const float alpha)
@@ -176,6 +177,10 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	}
 }
 
+/*__global__ void transpose ()
+{
+}*/
+
 inline void copyFloatArrayToDevice (const floatArray host_array, floatArray & device_array)
 {
     device_array.l = host_array.l;
@@ -213,7 +218,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     cudaGetDeviceCount(&deviceCount);
     //std::cout << "Device count: " << deviceCount << std::endl;
     unsigned int npixels = u.l/3;
-    if (npixels <= 32) deviceCount = 1; //this is a debugging mode
+    if (npixels <= THREADS_PER_BLOCK) deviceCount = 1; //this is a debugging mode
     //there are 4 GPUs, and each of them cover a quarter of the pixels
     //we're calling a pixSeg (pixel segment) a group of 32 pixels
     unsigned int pixSegsToCover = (npixels+31)/32;
@@ -228,14 +233,13 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 
     float * precompute_array[deviceCount];
 
-    if (npixels <= 32) deviceCount = 1; //this is a debugmode thing to get it to run on only 1 gpu.
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * 32 <= npixels) ? pixSegsPerGPU * 32 : npixels - (deviceCount-1) * pixSegsPerGPU * 32;
+        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
 	floatArray u_for_gpu;
-	u_for_gpu.p = u.p + (gpuId * pixSegsPerGPU * 32)*3;
+	u_for_gpu.p = u.p + (gpuId * pixSegsPerGPU * THREADS_PER_BLOCK)*3;
 	u_for_gpu.l = npixels_per_gpu*3;
 	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
@@ -276,7 +280,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	d_cp.thetas = d_thetas[gpuId];
 
 	unsigned int pixSegsPerBlock = (pixSegsPerGPU + blocksPerGPU - 1)/blocksPerGPU;
-	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], 
+	dirtymap_kernel<<<blocksPerGPU,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId],
 		pixSegsPerBlock, precompute_array[gpuId]);
     }
 
@@ -289,8 +293,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * 32 <= npixels) ? pixSegsPerGPU * 32 : npixels - (deviceCount-1) * pixSegsPerGPU * 32;
-        cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * 32 * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
+        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
+        cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * THREADS_PER_BLOCK * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
         cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);

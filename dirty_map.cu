@@ -30,9 +30,9 @@ struct chordParams
 
 __device__ inline void ang2vec (const float theta, const float phi, float outvec [3])
 {
-    outvec[0] = sin(theta)*cos(phi);
-    outvec[1] = sin(theta)*sin(phi);
-    outvec[2] = cos(theta);
+    outvec[0] = sinf(theta)*cosf(phi);
+    outvec[1] = sinf(theta)*sinf(phi);
+    outvec[2] = cosf(theta);
 }
 
 __device__ inline void cross (const float v1 [3], const float v2 [3], float outvec [3])
@@ -44,8 +44,8 @@ __device__ inline void cross (const float v1 [3], const float v2 [3], float outv
 
 __device__ inline void rotate (const float v [3], float outvec [3], const float alpha)
 {
-    outvec[0] = cos(alpha)*v[0] - sin(alpha)*v[1];
-    outvec[1] = sin(alpha)*v[0] + cos(alpha)*v[1];
+    outvec[0] = cosf(alpha)*v[0] - sinf(alpha)*v[1];
+    outvec[1] = sinf(alpha)*v[0] + cosf(alpha)*v[1];
     outvec[2] = v[2];
 }
 
@@ -58,13 +58,13 @@ __device__ inline float crossmag(const float v1 [3], const float v2 [3])
 {
     float cv [3];
     cross(v1,v2,cv);
-    return sqrt(dot(cv,cv));
+    return sqrtf(dot(cv,cv));
 }
 
 __device__ float B_sq (const float alpha, const float wavelength, const float D)
 {
-    float alphaprime = PI*D*sin(alpha)/wavelength;
-    if (alphaprime <= float(1E-8) && alphaprime >= float(-1E-8))
+    float alphaprime = PI*D*sinf(alpha)/wavelength;
+    if (alphaprime <= 1E-8f && alphaprime >= -1E-8f)
         return (j0f(alphaprime)-jnf(2,alphaprime))*(j0f(alphaprime)-jnf(2,alphaprime)); //l'Hopital's
     else
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
@@ -78,10 +78,10 @@ __device__ inline float Bsq_from_vecs (const float v1 [3], const float v2 [3], c
     {
         //we want to deal with the arccos instiblity by using the cross product formula instead
         float delta_ang;
-        if (dp < 0.99f) delta_ang = std::acos(dp);    
-        else 
+        if (dp < 0.99f) delta_ang = acosf(dp);
+        else
         {
-            delta_ang = std::asin(crossmag(v1,v2));
+            delta_ang = asinf(crossmag(v1,v2));
             //delta_ang = (dp > 0) ? delta_ang : PI-delta_ang; //I don't need this line with the horizon condition
         }
         return B_sq(delta_ang, wavelength, D);
@@ -95,12 +95,12 @@ __device__ inline float subtractdot (const float v1_a [3], const float v1_b [3],
 
 __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
 {
-    float x = fmodf(x_prime,PI); // -pi < x < pi
-    x = fabs(x); // 0 < x < pi
-    x = (x > PI/2) ? PI-x : x; //0 < x < pi/2
+    float x = fmodf(x_prime,1.0); // -1.0 < x < 1.0
+    x = fabs(x); // 0 < x < 1.0
+    x = (x > 0.5) ? 1-x : x; //0 < x < 0.5
     
-    if (fabs(x) < float(1E-9)) return m*m*cos(m*x)*cos(m*x)/(cos(x)*cos(x));
-    else return sin(m*x)*sin(m*x)/(sin(x)*sin(x));
+    if (fabs(x) < 1E-9f) return m*m*cospif(m*x)*cospif(m*x)/(cospif(x)*cospif(x));
+    else return sinpif(m*x)*sinpif(m*x)/(sinpif(x)*sinpif(x));
 }
 
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, 
@@ -151,8 +151,8 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	                            float source_rot [3];
 	                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
-	                            float cdir1 = PI*L1s[k]/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec+3*k);
-	                            float cdir2 = PI*cp.L2 /wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec+3*k);
+	                            float cdir1 = L1s[k]/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec+3*k);
+	                            float cdir2 = cp.L2 /wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec+3*k);
 
 	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);
 	                            float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);

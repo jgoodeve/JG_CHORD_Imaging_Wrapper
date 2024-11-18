@@ -123,7 +123,7 @@ __global__ void precompute (float * precomputed_array, const chordParams cp)
 }
 
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, 
-	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock, const float * precompute_array)
+	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock, const float precompute_array[10*MAX_DITHERS])
 {
     //int deviceID;
     //cudaGetDevice(&deviceID);
@@ -142,14 +142,14 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 			float time_sum = 0;
 	                if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
 	                {
-	     		    float source_phi = atan2(source_positions.p[s*3+1],source_positions.p[s*3]);
+	     		    float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
 			    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
-			    for (unsigned int k = 0; k < cp.thetas.l; k++)
+			    for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
 	                    {
 				const float * chord_pointing = precompute_array + 10*k;
 				const float * dir1_proj_vec  = precompute_array + 10*k+3;
 				const float * dir2_proj_vec  = precompute_array + 10*k+6;
-				const float * L1_modified = precompute_array+10*k+9;
+				const float L1_modified = *(precompute_array+10*k+9);
 	                        for (unsigned int j = 0; j < cp.time_samples; j++)
 	                        {
 	                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
@@ -158,7 +158,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	                            float source_rot [3];
 	                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
-	                            float cdir1 = (*L1_modified)/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
+	                            float cdir1 = L1_modified/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
 	                            float cdir2 = cp.L2/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec);
 
 	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);

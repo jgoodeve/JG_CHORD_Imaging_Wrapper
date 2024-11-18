@@ -131,7 +131,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	//calculating the relevant CHORD vec
 	for (unsigned int ps = 0; ps < pixSegsPerBlock; ps++)
 	{
-	    unsigned int pixelIdx = blockIdx.x*32*pixSegsPerBlock + ps*32 + threadIdx.x;
+	    unsigned int pixelIdx = blockIdx.x*THREADS_PER_BLOCK*pixSegsPerBlock + ps*THREADS_PER_BLOCK + threadIdx.x;
 	    if (pixelIdx*3 < u.l)
 	    {
 	        float * threadu = u.p + pixelIdx*3;

@@ -6,6 +6,8 @@
 #include <climits>  /*UINT_MAX*/
 #include <iostream>
 
+#define MAX_DITHERS 5
+
 constexpr float PI = 3.14159265358979323846f;
 constexpr float omega = float(2*PI/86400); //earth angular velocity in rads/second
 
@@ -103,28 +105,28 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
     else return sinpif(m*x)*sinpif(m*x)/(sinpif(x)*sinpif(x));
 }
 
+__global__ void precompute (float * precomputed_array, const chordParams cp)
+{
+	//it should be organized like dither 1, 3 vectors and then the L1, dither 2 3 vectors and L1 and so on
+	for (unsigned int i = 0; i<MAX_DITHERS; i++)
+	{
+		float * chord_pointing = precomputed_array + 10*i; //calculating baseline unit vectors
+		float * dir1_proj_vec  = precomputed_array + 10*i+3;
+		float * dir2_proj_vec  = precomputed_array + 10*i+6;
+	        float * L1_modified = precomputed_array+10*i+9; //accounting for CHORD's baseline shrinking when it points away from zenith
+		ang2vec(cp.thetas.p[i], 0, chord_pointing);
+	        ang2vec(cp.thetas.p[i] + PI/2, 0, dir1_proj_vec);
+   	        cross(dir1_proj_vec, chord_pointing, dir2_proj_vec);
+		&L1_modified = cp.L1*cosf(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[i]);
+	}
+}
+
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, 
-	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock)
+	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock, const float * precompute_array)
 {
     //int deviceID;
     //cudaGetDevice(&deviceID);
-	//calculating the relevant CHORD vectors for each dither direction
-	float * chord_pointing = new float [3*cp.thetas.l];
-	float * dir1_proj_vec = new float [3*cp.thetas.l]; //north/south chord direction
-	float * dir2_proj_vec = new float [3*cp.thetas.l]; //east/west chord direction
-	for (unsigned int k = 0; k < cp.thetas.l; k++)
-	{
-	    ang2vec(cp.thetas.p[k], 0, chord_pointing+3*k);
-	    ang2vec(cp.thetas.p[k] + PI/2, 0, dir1_proj_vec+3*k);
-	    cross(dir1_proj_vec+3*k, chord_pointing+3*k, dir2_proj_vec+3*k);
-	}
-	//accounting for CHORD's baseline shrinking when it points away from zenith
-	float * L1s = new float [cp.thetas.l];
-	for (unsigned int k = 0; k < cp.thetas.l; k++)
-	{
-	    L1s[k] = cp.L1*cos(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[k]);
-	}
-
+	//calculating the relevant CHORD vec
 	for (unsigned int ps = 0; ps < pixSegsPerBlock; ps++)
 	{
 	    unsigned int pixelIdx = blockIdx.x*32*pixSegsPerBlock + ps*32 + threadIdx.x;
@@ -143,6 +145,10 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 			    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
 			    for (unsigned int k = 0; k < cp.thetas.l; k++)
 	                    {
+				float * chord_pointing = precompute_array + 10*k;
+				float * dir1_proj_vec  = precomputed_array + 10*k+3;
+				float * dir2_proj_vec  = precomputed_array + 10*k+6;
+				float * L1_modified = precomputed_array+10*k+9;
 	                        for (unsigned int j = 0; j < cp.time_samples; j++)
 	                        {
 	                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
@@ -151,11 +157,11 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	                            float source_rot [3];
 	                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
-	                            float cdir1 = L1s[k]/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec+3*k);
-	                            float cdir2 = cp.L2 /wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec+3*k);
+	                            float cdir1 = L1_modified/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
+	                            float cdir2 = cp.L2/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec);
 
-	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);
-	                            float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing+3*k, wavelengths.p[l], cp.D);
+	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
+	                            float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing, wavelengths.p[l], cp.D);
 
 	                            time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
 	                        }
@@ -167,10 +173,6 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	        }
 	    }
 	}
-        delete chord_pointing;
-        delete dir1_proj_vec;
-        delete dir2_proj_vec;
-        delete L1s;
 }
 
 inline void copyFloatArrayToDevice (const floatArray host_array, floatArray & device_array)
@@ -204,6 +206,8 @@ unsigned int smallest_remainder (unsigned int min, unsigned int max, unsigned in
 
 extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
+    assert(cp.thetas.l <= MAX_DITHERS);
+
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
     //std::cout << "Device count: " << deviceCount << std::endl;
@@ -221,6 +225,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     floatArray d_source_spectra[deviceCount];
     floatArray d_thetas[deviceCount];
 
+    float * precompute_array[deviceCount];
+
     if (npixels <= 32) deviceCount = 1; //this is a debugmode thing to get it to run on only 1 gpu.
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
@@ -236,8 +242,19 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	copyFloatArrayToDevice(source_spectra,d_source_spectra[gpuId]);
 	copyFloatArrayToDevice(cp.thetas,d_thetas[gpuId]);
 
+	//allocating the precompute array
+	cudaMalloc(&(precompute_array[gpuId]), sizeof(float)*10*MAX_DITHERS);
         //allocating the return array
         cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths.l);
+    }
+
+    //running a quick kernel to precompute some values on all the GPUs
+    for (int gpuId = 0; gpuId < deviceCount; gpuId++)
+    {
+        cudaSetDevice(gpuId);
+	chordParams d_cp = cp;
+	d_cp.thetas = d_thetas[gpuId];
+	precompute<<<1,1>>>(precompute_array[gpuId], d_cp);
     }
 
     //launching the kernels on all the GPUs
@@ -258,7 +275,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	d_cp.thetas = d_thetas[gpuId];
 
 	unsigned int pixSegsPerBlock = (pixSegsPerGPU + blocksPerGPU - 1)/blocksPerGPU;
-	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], pixSegsPerBlock);
+	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], pixSegsPerBlock, precompute_array);
     }
 
     cudaDeviceSynchronize();
@@ -278,6 +295,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaFree(d_source_positions[gpuId].p);
 	cudaFree(d_source_spectra[gpuId].p);
 	cudaFree(d_thetas[gpuId].p);
+	cudaFree(precompute_array[gpuId]);
     }
 }
 }

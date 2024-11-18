@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <climits>  /*UINT_MAX*/
 #include <iostream>
+#include <cassert> /* assert */
 
 #define MAX_DITHERS 5
 
@@ -108,7 +109,7 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
 __global__ void precompute (float * precomputed_array, const chordParams cp)
 {
 	//it should be organized like dither 1, 3 vectors and then the L1, dither 2 3 vectors and L1 and so on
-	for (unsigned int i = 0; i<MAX_DITHERS; i++)
+	for (unsigned int i = 0; i<MAX_DITHERS && i<cp.thetas.l; i++)
 	{
 		float * chord_pointing = precomputed_array + 10*i; //calculating baseline unit vectors
 		float * dir1_proj_vec  = precomputed_array + 10*i+3;
@@ -117,7 +118,7 @@ __global__ void precompute (float * precomputed_array, const chordParams cp)
 		ang2vec(cp.thetas.p[i], 0, chord_pointing);
 	        ang2vec(cp.thetas.p[i] + PI/2, 0, dir1_proj_vec);
    	        cross(dir1_proj_vec, chord_pointing, dir2_proj_vec);
-		&L1_modified = cp.L1*cosf(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[i]);
+		*L1_modified = cp.L1*cosf(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[i]);
 	}
 }
 
@@ -145,10 +146,10 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 			    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
 			    for (unsigned int k = 0; k < cp.thetas.l; k++)
 	                    {
-				float * chord_pointing = precompute_array + 10*k;
-				float * dir1_proj_vec  = precomputed_array + 10*k+3;
-				float * dir2_proj_vec  = precomputed_array + 10*k+6;
-				float * L1_modified = precomputed_array+10*k+9;
+				const float * chord_pointing = precompute_array + 10*k;
+				const float * dir1_proj_vec  = precompute_array + 10*k+3;
+				const float * dir2_proj_vec  = precompute_array + 10*k+6;
+				const float * L1_modified = precompute_array+10*k+9;
 	                        for (unsigned int j = 0; j < cp.time_samples; j++)
 	                        {
 	                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
@@ -157,7 +158,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 	                            float source_rot [3];
 	                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
-	                            float cdir1 = L1_modified/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
+	                            float cdir1 = (*L1_modified)/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
 	                            float cdir2 = cp.L2/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec);
 
 	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
@@ -275,7 +276,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	d_cp.thetas = d_thetas[gpuId];
 
 	unsigned int pixSegsPerBlock = (pixSegsPerGPU + blocksPerGPU - 1)/blocksPerGPU;
-	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], pixSegsPerBlock, precompute_array);
+	dirtymap_kernel<<<blocksPerGPU,32>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], 
+		pixSegsPerBlock, precompute_array[gpuId]);
     }
 
     cudaDeviceSynchronize();

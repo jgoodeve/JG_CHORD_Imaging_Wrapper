@@ -221,7 +221,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     if (npixels <= THREADS_PER_BLOCK) deviceCount = 1; //this is a debugging mode
     //there are 4 GPUs, and each of them cover a quarter of the pixels
     //we're calling a pixSeg (pixel segment) a group of 32 pixels
-    unsigned int pixSegsToCover = (npixels+31)/32;
+    unsigned int pixSegsToCover = (npixels+THREADS_PER_BLOCK-1)/THREADS_PER_BLOCK;
     unsigned int pixSegsPerGPU = (pixSegsToCover+deviceCount-1)/deviceCount;
 
     float * d_dm [deviceCount]; //array that holds pointers to the deviceCount output arrays
@@ -238,6 +238,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaSetDevice(gpuId);
 	//copying data over to the device
         unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
+        std::cout << "NPIXELS_PER_GPU " << npixels_per_gpu << " for gpu " << gpuId << std::endl;
 	floatArray u_for_gpu;
 	u_for_gpu.p = u.p + (gpuId * pixSegsPerGPU * THREADS_PER_BLOCK)*3;
 	u_for_gpu.l = npixels_per_gpu*3;

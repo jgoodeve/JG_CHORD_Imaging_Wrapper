@@ -223,6 +223,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     //we're calling a pixSeg (pixel segment) a group of 32 pixels
     unsigned int pixSegsToCover = (npixels+THREADS_PER_BLOCK-1)/THREADS_PER_BLOCK;
     unsigned int pixSegsPerGPU = (pixSegsToCover+deviceCount-1)/deviceCount;
+    unsigned int npixels_per_gpu[deviceCount]; //array that we'll fill in with the number of pixels on each GPU
 
     float * d_dm [deviceCount]; //array that holds pointers to the deviceCount output arrays
     floatArray d_u[deviceCount];
@@ -237,11 +238,10 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
-        std::cout << "NPIXELS_PER_GPU " << npixels_per_gpu << " for gpu " << gpuId << std::endl;
+        npixels_per_gpu[gpuId] = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
 	floatArray u_for_gpu;
 	u_for_gpu.p = u.p + (gpuId * pixSegsPerGPU * THREADS_PER_BLOCK)*3;
-	u_for_gpu.l = npixels_per_gpu*3;
+	u_for_gpu.l = npixels_per_gpu[gpuId]*3;
 	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
@@ -251,7 +251,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	//allocating the precompute array
 	cudaMalloc(&(precompute_array[gpuId]), sizeof(float)*10*MAX_DITHERS);
         //allocating the return array
-        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths.l);
+        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu[gpuId]*wavelengths.l);
     }
 
     //running a quick kernel to precompute some values on all the GPUs
@@ -294,8 +294,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-        unsigned int npixels_per_gpu = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
-        cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * THREADS_PER_BLOCK * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths.l, cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * THREADS_PER_BLOCK * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu[gpuId]*wavelengths.l, cudaMemcpyDeviceToHost);
         cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);

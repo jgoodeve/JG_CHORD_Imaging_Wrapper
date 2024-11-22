@@ -132,7 +132,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
     if (pixelIdx*3 < u.l)
     {
         float * threadu = u.p + pixelIdx*3;
-	for (unsigned int l = 0; l < wavelengths.l; l++)
+	for (unsigned int l = blockIdx.y*32; l < blockIdx.y*32+32; l++)
         {
             float usum = 0;
             for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
@@ -201,8 +201,11 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     //there are 4 GPUs, and each of them cover a quarter of the pixels
     //let's calculate how many pixels we need so that this divides evenly
     unsigned int npixels_padded = (npixels + (deviceCount * THREADS_PER_BLOCK) - 1)/(deviceCount * THREADS_PER_BLOCK) * (deviceCount * THREADS_PER_BLOCK); //this seems weird but works
-    unsigned int nblocks_per_gpu = npixels_padded/(deviceCount*THREADS_PER_BLOCK);
+    unsigned int nblocks_per_gpu = npixels_padded/(deviceCount*THREADS_PER_BLOCK); //this is kind of a misnomer. This means number of blocks in the x dimension. Over freq dimension is different.
     unsigned int npixels_per_gpu = nblocks_per_gpu * THREADS_PER_BLOCK;
+    unsigned int nwavelengths_padded = (wavelengths.l+31)/32 * 32; // padded out to be a multiple of 32
+    unsigned int nsources = source_spectra.l/wavelengths.l;
+    dim3 nblocks_both_dims (nblocks_per_gpu, nwavelengths_padded/32); //we want to call one block per 32 wavelengths
 
     //padding
     float * u_padding = new float [(npixels_padded-npixels)*3];
@@ -211,6 +214,19 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	u_padding[3*i]   = 1;
 	u_padding[3*i+1] = 0;
 	u_padding[3*i+2] = 0;
+    }
+    floatArray wavelengths_padded;
+    wavelengths_padded.p = new float [nwavelengths_padded];
+    wavelengths_padded.l = nwavelengths_padded;
+    for (unsigned int i = 0; i < wavelengths.l; i++) wavelengths_padded.p[i] = wavelengths.p[i];
+    for (unsigned int i = wavelengths.l; i < nwavelengths_padded; i++) wavelengths_padded.p[i] = 1E10f; //some crazy number to help tell that it's fake in case I copy the wrong thing.
+    floatArray source_spectra_padded;
+    source_spectra_padded.p = new float [nwavelengths_padded*nsources];
+    source_spectra_padded.l = nwavelengths_padded*nsources;
+    for (unsigned int j = 0; j < nsources; j++)
+    {
+	for (unsigned int i = 0; i < wavelengths.l; i++) source_spectra_padded.p[j*nwavelengths_padded+i] = source_spectra.p[j*wavelengths.l+i];
+        for (unsigned int i = wavelengths.l; i < nwavelengths_padded; i++) source_spectra_padded.p[j*nwavelengths_padded+i] = 0;
     }
     //padding over
 
@@ -227,9 +243,9 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
+	copyFloatArrayToDevice(wavelengths_padded,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
-	copyFloatArrayToDevice(source_spectra,d_source_spectra[gpuId]);
+	copyFloatArrayToDevice(source_spectra_padded,d_source_spectra[gpuId]);
 	copyFloatArrayToDevice(cp.thetas,d_thetas[gpuId]);
 
 	//copying over the u vectors that we need
@@ -241,10 +257,12 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	//allocating the precompute array
 	cudaMalloc(&(precompute_array[gpuId]), sizeof(float)*10*MAX_DITHERS);
         //allocating the return array
-        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths.l);
+        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths_padded.l);
     }
     cudaDeviceSynchronize();
     delete u_padding; //we don't need this anymore I think, making sure we sync before deleting
+    delete wavelengths_padded.p;
+    delete source_spectra_padded.p;
 
     cudaError_t copying_err = cudaGetLastError();
     if (copying_err != cudaSuccess) std::cout << "Error from copying: " << copying_err << std::endl;
@@ -266,7 +284,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	chordParams d_cp = cp;
 	d_cp.thetas = d_thetas[gpuId];
 
-	dirtymap_kernel<<<nblocks_per_gpu,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId],
+	dirtymap_kernel<<<nblocks_both_dims,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId],
 		precompute_array[gpuId]);
     }
 
@@ -276,11 +294,11 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     if (kernel_err != cudaSuccess) std::cout << "Error from kernel: " << kernel_err << std::endl;
 
     //copying over the data from the GPUs when they're done running
+    float * dm_padded = new float[npixels_padded*wavelengths_padded.l];
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-	unsigned int pixels_to_copy = (gpuId+1) * npixels_per_gpu < npixels ? npixels_per_gpu : npixels - gpuId*npixels_per_gpu;
-        cudaMemcpyAsync(dm + gpuId * npixels_per_gpu * wavelengths.l, d_dm[gpuId], sizeof(float)*pixels_to_copy*wavelengths.l, cudaMemcpyDeviceToHost);
+        cudaMemcpyAsync(dm_padded + gpuId * npixels_per_gpu * wavelengths_padded.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths_padded.l, cudaMemcpyDeviceToHost);
         cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);
@@ -290,6 +308,13 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaFree(precompute_array[gpuId]);
     }
     cudaDeviceSynchronize();
+
+    //now we need to de-pad
+    for (unsigned int i = 0; i < npixels; i++)
+    {
+	for (unsigned int j = 0; j < wavelengths.l; j++) dm[i*wavelengths.l+j] = dm_padded[i*wavelengths_padded.l+j];
+    }
+    delete dm_padded;
 }
 }
 

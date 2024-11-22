@@ -124,57 +124,53 @@ __global__ void precompute (float * precomputed_array, const chordParams cp)
 }
 
 __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, 
-	float brightness_threshold, const chordParams cp, float * dm, unsigned int pixSegsPerBlock, const float precompute_array[10*MAX_DITHERS])
+	float brightness_threshold, const chordParams cp, float * dm, const float precompute_array[10*MAX_DITHERS])
 {
     //int deviceID;
     //cudaGetDevice(&deviceID);
-	//calculating the relevant CHORD vec
-	for (unsigned int ps = 0; ps < pixSegsPerBlock; ps++)
-	{
-	    unsigned int pixelIdx = blockIdx.x*THREADS_PER_BLOCK*pixSegsPerBlock + ps*THREADS_PER_BLOCK + threadIdx.x;
-	    if (pixelIdx*3 < u.l)
-	    {
-	        float * threadu = u.p + pixelIdx*3;
-		for (unsigned int l = 0; l < wavelengths.l; l++)
-	        {
-	            float usum = 0;
-	            for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
-	            {
-			float time_sum = 0;
-	                if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
-	                {
-	     		    float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
-			    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
-			    for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
-	                    {
-				const float * chord_pointing = precompute_array + 10*k;
-				const float * dir1_proj_vec  = precompute_array + 10*k+3;
-				const float * dir2_proj_vec  = precompute_array + 10*k+6;
-				const float L1_modified = *(precompute_array+10*k+9);
-	                        for (unsigned int j = 0; j < cp.time_samples; j++)
-	                        {
-	                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
-	                            float u_rot [3];
-	                            rotate(threadu, u_rot, travelangle);
-	                            float source_rot [3];
-	                            rotate(source_positions.p+3*s, source_rot, travelangle);
+    unsigned int pixelIdx = blockIdx.x*THREADS_PER_BLOCK + threadIdx.x;
+    if (pixelIdx*3 < u.l)
+    {
+        float * threadu = u.p + pixelIdx*3;
+	for (unsigned int l = 0; l < wavelengths.l; l++)
+        {
+            float usum = 0;
+            for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
+            {
+		float time_sum = 0;
+                if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
+                {
+     		    float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
+		    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
+		    for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
+                    {
+			const float * chord_pointing = precompute_array + 10*k;
+			const float * dir1_proj_vec  = precompute_array + 10*k+3;
+			const float * dir2_proj_vec  = precompute_array + 10*k+6;
+			const float L1_modified = *(precompute_array+10*k+9);
+                        for (unsigned int j = 0; j < cp.time_samples; j++)
+                        {
+                            float travelangle = initial_travelangle+j*cp.delta_tau*omega;
+                            float u_rot [3];
+                            rotate(threadu, u_rot, travelangle);
+                            float source_rot [3];
+                            rotate(source_positions.p+3*s, source_rot, travelangle);
 
-	                            float cdir1 = L1_modified/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
-	                            float cdir2 = cp.L2/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec);
+                            float cdir1 = L1_modified/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir1_proj_vec);
+                            float cdir2 = cp.L2/wavelengths.p[l]*subtractdot(source_rot, u_rot, dir2_proj_vec);
 
-	                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
-	                            float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing, wavelengths.p[l], cp.D);
+                            float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
+                            float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing, wavelengths.p[l], cp.D);
 
-	                            time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
-	                        }
-	                    }
-	                }
-	                usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
-	            }
-	            dm[pixelIdx*wavelengths.l + l] += usum;
-	        }
-	    }
-	}
+                            time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
+                        }
+                    }
+                }
+                usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
+            }
+            dm[pixelIdx*wavelengths.l + l] += usum;
+        }
+    }
 }
 
 /*__global__ void transpose ()
@@ -193,23 +189,6 @@ inline void copyFloatArrayToDevice (const floatArray host_array, floatArray & de
     if (err != cudaSuccess) {fprintf(stderr, "Failed to copy data to device array (error code %s)!\n", cudaGetErrorString(err)); exit(EXIT_FAILURE);}
 }
 
-unsigned int smallest_remainder (unsigned int min, unsigned int max, unsigned int num)
-{
-	unsigned int bg = min; //best guess
-	unsigned int br = UINT_MAX; //best remainder
-	for (unsigned int i = min; i <= max; i++)
-	{
-		unsigned int quotient = (num+i-1)/i;
-		unsigned int remainder = i*quotient - num;
-		if (remainder < br)
-			{
-				bg = i;
-				br = remainder;
-			}
-	}
-	return bg;
-}
-
 extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelengths, const floatArray source_positions, const floatArray source_spectra, float brightness_threshold, const chordParams cp, float * dm)
 {
     assert(cp.thetas.l <= MAX_DITHERS);
@@ -220,10 +199,20 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     unsigned int npixels = u.l/3;
     if (npixels <= THREADS_PER_BLOCK) deviceCount = 1; //this is a debugging mode
     //there are 4 GPUs, and each of them cover a quarter of the pixels
-    //we're calling a pixSeg (pixel segment) a group of 32 pixels
-    unsigned int pixSegsToCover = (npixels+THREADS_PER_BLOCK-1)/THREADS_PER_BLOCK;
-    unsigned int pixSegsPerGPU = (pixSegsToCover+deviceCount-1)/deviceCount;
-    unsigned int npixels_per_gpu[deviceCount]; //array that we'll fill in with the number of pixels on each GPU
+    //let's calculate how many pixels we need so that this divides evenly
+    unsigned int npixels_padded = (npixels + (deviceCount * THREADS_PER_BLOCK) - 1)/(deviceCount * THREADS_PER_BLOCK) * (deviceCount * THREADS_PER_BLOCK); //this seems weird but works
+    unsigned int nblocks_per_gpu = npixels_padded/(deviceCount*THREADS_PER_BLOCK);
+    unsigned int npixels_per_gpu = nblocks_per_gpu * THREADS_PER_BLOCK;
+
+    //padding
+    float * u_padding = new float [(npixels_padded-npixels)*3];
+    for (unsigned int i = 0; i < npixels_padded-npixels; i++)
+    {
+	u_padding[3*i]   = 1;
+	u_padding[3*i+1] = 0;
+	u_padding[3*i+2] = 0;
+    }
+    //padding over
 
     float * d_dm [deviceCount]; //array that holds pointers to the deviceCount output arrays
     floatArray d_u[deviceCount];
@@ -238,21 +227,27 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     {
 	cudaSetDevice(gpuId);
 	//copying data over to the device
-        npixels_per_gpu[gpuId] = ((gpuId+1) * pixSegsPerGPU * THREADS_PER_BLOCK <= npixels) ? pixSegsPerGPU * THREADS_PER_BLOCK : npixels - (deviceCount-1) * pixSegsPerGPU * THREADS_PER_BLOCK;
-	floatArray u_for_gpu;
-	u_for_gpu.p = u.p + (gpuId * pixSegsPerGPU * THREADS_PER_BLOCK)*3;
-	u_for_gpu.l = npixels_per_gpu[gpuId]*3;
-	copyFloatArrayToDevice(u_for_gpu,d_u[gpuId]);
 	copyFloatArrayToDevice(wavelengths,d_wavelengths[gpuId]);
 	copyFloatArrayToDevice(source_positions, d_source_positions[gpuId]);
 	copyFloatArrayToDevice(source_spectra,d_source_spectra[gpuId]);
 	copyFloatArrayToDevice(cp.thetas,d_thetas[gpuId]);
 
+	//copying over the u vectors that we need
+        cudaMalloc(&d_u[gpuId].p, sizeof(float) * npixels_per_gpu * 3);
+	unsigned int pixels_to_copy = (gpuId+1) * npixels_per_gpu < npixels ? npixels_per_gpu : npixels - gpuId*npixels_per_gpu;
+	cudaMemcpyAsync(d_u[gpuId].p, u.p + gpuId*npixels_per_gpu*3, sizeof(float)*pixels_to_copy*3, cudaMemcpyHostToDevice);
+	cudaMemcpyAsync(d_u[gpuId].p, u_padding, sizeof(float) * (npixels_per_gpu-pixels_to_copy)*3, cudaMemcpyHostToDevice); //copying over the padding
+
 	//allocating the precompute array
 	cudaMalloc(&(precompute_array[gpuId]), sizeof(float)*10*MAX_DITHERS);
         //allocating the return array
-        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu[gpuId]*wavelengths.l);
+        cudaMalloc(&(d_dm[gpuId]), sizeof(float)*npixels_per_gpu*wavelengths.l);
     }
+    cudaDeviceSynchronize();
+    delete u_padding; //we don't need this anymore I think, making sure we sync before deleting
+
+    cudaError_t copying_err = cudaGetLastError();
+    if (copying_err != cudaSuccess) std::cout << "Error from copying: " << copying_err << std::endl;
 
     //running a quick kernel to precompute some values on all the GPUs
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
@@ -263,26 +258,16 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	precompute<<<1,1>>>(precompute_array[gpuId], d_cp);
     }
 
-    //launching the kernels on all the GPUs
-    //on p100s, I want to launch ~7168 threads, or 224 blocks
-    //on V100s, I want to launch ~10240 threads, or 320 blocks
-    //let's generalize this to work with any GPU
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    int approxBlocksToLaunch = deviceProp.multiProcessorCount * 4;
-    unsigned int blocksPerGPU = smallest_remainder(approxBlocksToLaunch-25, approxBlocksToLaunch+25, pixSegsPerGPU);
+    //launching main kernel
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-	//int deviceId;
-	//cudaGetDevice(&deviceId);
 
 	chordParams d_cp = cp;
 	d_cp.thetas = d_thetas[gpuId];
 
-	unsigned int pixSegsPerBlock = (pixSegsPerGPU + blocksPerGPU - 1)/blocksPerGPU;
-	dirtymap_kernel<<<blocksPerGPU,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId],
-		pixSegsPerBlock, precompute_array[gpuId]);
+	dirtymap_kernel<<<nblocks_per_gpu,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId],
+		precompute_array[gpuId]);
     }
 
     cudaDeviceSynchronize();
@@ -294,7 +279,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-        cudaMemcpyAsync(dm + gpuId * pixSegsPerGPU * THREADS_PER_BLOCK * wavelengths.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu[gpuId]*wavelengths.l, cudaMemcpyDeviceToHost);
+	unsigned int pixels_to_copy = (gpuId+1) * npixels_per_gpu < npixels ? npixels_per_gpu : npixels - gpuId*npixels_per_gpu;
+        cudaMemcpyAsync(dm + gpuId * npixels_per_gpu * wavelengths.l, d_dm[gpuId], sizeof(float)*pixels_to_copy*wavelengths.l, cudaMemcpyDeviceToHost);
         cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);
@@ -303,6 +289,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 	cudaFree(d_thetas[gpuId].p);
 	cudaFree(precompute_array[gpuId]);
     }
+    cudaDeviceSynchronize();
 }
 }
 

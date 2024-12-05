@@ -101,7 +101,7 @@ __device__ float sin_sq_ratio (const unsigned int m, const float x_prime)
 {
     float x = fmodf(x_prime,1.0); // -1.0 < x < 1.0
     x = fabs(x); // 0 < x < 1.0
-    x = (x > 0.5) ? 1-x : x; //0 < x < 0.5
+    x = (x > 0.5f) ? 1-x : x; //0 < x < 0.5
     
     if (fabs(x) < 1E-9f) return m*m*cospif(m*x)*cospif(m*x)/(cospif(x)*cospif(x));
     else return sinpif(m*x)*sinpif(m*x)/(sinpif(x)*sinpif(x));

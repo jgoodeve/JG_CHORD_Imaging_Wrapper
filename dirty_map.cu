@@ -132,22 +132,22 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
     if (pixelIdx*3 < u.l)
     {
         float * threadu = u.p + pixelIdx*3;
-	for (unsigned int l = blockIdx.y*32; l < blockIdx.y*32+32; l++)
+        for (unsigned int l = blockIdx.y*32; l < blockIdx.y*32+32; l++)
         {
             float usum = 0;
             for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
             {
-		float time_sum = 0;
+		        float time_sum = 0;
                 if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
                 {
      		    float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
-		    float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
-		    for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
+		        float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
+		        for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
                     {
-			const float * chord_pointing = precompute_array + 10*k;
-			const float * dir1_proj_vec  = precompute_array + 10*k+3;
-			const float * dir2_proj_vec  = precompute_array + 10*k+6;
-			const float L1_modified = *(precompute_array+10*k+9);
+			            const float * chord_pointing = precompute_array + 10*k;
+			            const float * dir1_proj_vec  = precompute_array + 10*k+3;
+			            const float * dir2_proj_vec  = precompute_array + 10*k+6;
+			            const float L1_modified = *(precompute_array+10*k+9);
                         for (unsigned int j = 0; j < cp.time_samples; j++)
                         {
                             float travelangle = initial_travelangle+j*cp.delta_tau*omega;
@@ -168,7 +168,7 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                 }
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
-            dm[pixelIdx*wavelengths.l + l] += usum;
+            dm[pixelIdx*wavelengths.l + l] = usum/(cp.m1*cp.m1*cp.m2*cp.m2);
         }
     }
 }
@@ -298,8 +298,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (int gpuId = 0; gpuId < deviceCount; gpuId++)
     {
 	cudaSetDevice(gpuId);
-        cudaMemcpyAsync(dm_padded + gpuId * npixels_per_gpu * wavelengths_padded.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths_padded.l, cudaMemcpyDeviceToHost);
-        cudaFree(d_dm[gpuId]);
+    cudaMemcpyAsync(dm_padded + gpuId * npixels_per_gpu * wavelengths_padded.l, d_dm[gpuId], sizeof(float)*npixels_per_gpu*wavelengths_padded.l, cudaMemcpyDeviceToHost);
+    cudaFree(d_dm[gpuId]);
 	cudaFree(d_u[gpuId].p);
 	cudaFree(d_wavelengths[gpuId].p);
 	cudaFree(d_source_positions[gpuId].p);

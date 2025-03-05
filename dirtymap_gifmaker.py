@@ -2,12 +2,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import imageio.v3 as iio
 import os
+import pickle
 
-dm_file = np.load("simulated_dirtymap.npz")
-dm = dm_file["dirtymap"]
-frequencies = dm_file["frequencies"]
+dm_file = open("dirtymap.pickle","ab")
+dm_dict = pickle.load(dm_file)
+dm = dm_dict["dirtymap"]
+frequencies = dm_dict["frequencies"]
 nframes=frequencies.shape[0]
-dm = dm.reshape([150,600,nframes])
+nx = dm_dict["nx"]
+ny = dm_dict["ny"]
+
+dm = dm.reshape([nx,ny,nframes])
 maxInArray = np.max(dm)
 
 if not os.path.exists("/tmp/animate"):

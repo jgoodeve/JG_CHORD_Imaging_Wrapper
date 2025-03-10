@@ -83,7 +83,7 @@ omega = 2*np.pi/(3600*24)
 if __name__ == "__main__":
     t1 = time.time()
     nf = 32
-    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf, dtype=ctypes.c_float)[::-1]
+    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf, dtype=np.float32)[::-1]
     wavelengths = sol*1e3/(f*1e6)
     #test_wavelengths = np.asarray([0.21], dtype=ctypes.c_float)
 

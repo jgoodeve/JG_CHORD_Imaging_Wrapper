@@ -1,6 +1,8 @@
+from dm_simulator_wrapper import dirtymap_simulator_wrapper, unpackArraytoStruct, chordParams
 import numpy as np
 import time
-from dm_simulator_wrapper import dirtymap_simulator_wrapper, unpackArraytoStruct, chordParams
+import pickle
+
 
 def ang2vec (theta,phi):
     return np.array([np.cos(phi)*np.sin(theta),np.sin(phi)*np.sin(theta), np.cos(theta)]).T
@@ -106,6 +108,16 @@ if __name__ == "__main__":
     #u = get_radec_pixelvecs(nx,ny)
 
     dirtymap = dirtymap_simulator_wrapper (u, wavelengths, source_us, spectra, 0.01, cp)
-    np.savez("simulated_dirtymap.npz", dirtymap=dirtymap, frequencies=f)
     t2 = time.time()
     print("Dirtymap simulator took", t2-t1, "seconds")
+
+    dmDict = {
+        "dirtymap": dirtymap,
+        "freq": f,
+        "nx": nx,
+        "ny": ny
+    }
+
+    dmfile = open("dirtymap.pickle", "ab")
+    pickle.dump(dmDict,dmfile)
+    dmfile.close()

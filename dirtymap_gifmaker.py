@@ -4,10 +4,10 @@ import imageio.v3 as iio
 import os
 import pickle
 
-dm_file = open("dirtymap.pickle","ab")
+dm_file = open("dirtymap.pickle","rb")
 dm_dict = pickle.load(dm_file)
 dm = dm_dict["dirtymap"]
-frequencies = dm_dict["frequencies"]
+frequencies = dm_dict["freq"]
 nframes=frequencies.shape[0]
 nx = dm_dict["nx"]
 ny = dm_dict["ny"]

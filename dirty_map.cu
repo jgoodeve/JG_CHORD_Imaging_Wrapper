@@ -199,13 +199,13 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 
     int deviceCount;
     cudaGetDeviceCount(&deviceCount);
-    //std::cout << "Device count: " << deviceCount << std::endl;
+    std::cout << "Device count: " << deviceCount << std::endl;
     unsigned int npixels = u.l/3;
     if (npixels <= PIXELS_PER_BLOCK) deviceCount = 1; //this is a debugging mode
     //there are 4 GPUs, and each of them cover a quarter of the pixels
     //let's calculate how many pixels we need so that this divides evenly
     unsigned int npixelblocks_padded = (npixels+PIXELS_PER_BLOCK-1)/PIXELS_PER_BLOCK;
-    unsigned int npixels_padded = nblocks_padded*PIXELS_PER_BLOCK;
+    unsigned int npixels_padded = npixelblocks_padded*PIXELS_PER_BLOCK;
     unsigned int nwavelengths_padded = (wavelengths.l+31)/32 * 32; // padded out to be a multiple of 32
     unsigned int nsources = source_spectra.l/wavelengths.l;
 
@@ -214,9 +214,9 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     for (unsigned int i = 0; i < npixels*3; i++) u_padded[i] = u.p[i];
     for (unsigned int i = npixels; i < npixels_padded; i++)
     {
-		u_padding[3*i]   = 1;
-		u_padding[3*i+1] = 0;
-		u_padding[3*i+2] = 0;
+		u_padded[3*i]   = 1;
+		u_padded[3*i+1] = 0;
+		u_padded[3*i+2] = 0;
     }
     floatArray wavelengths_padded;
     wavelengths_padded.p = new float [nwavelengths_padded];
@@ -232,7 +232,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
         for (unsigned int i = wavelengths.l; i < nwavelengths_padded; i++) source_spectra_padded.p[j*nwavelengths_padded+i] = 0;
     }
     //padding over
-
+	assert(deviceCount < 10);
 
     float * d_dm [deviceCount]; //array that holds pointers to the deviceCount output arrays
     floatArray d_u[deviceCount];
@@ -241,8 +241,8 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     floatArray d_source_spectra[deviceCount];
     floatArray d_thetas[deviceCount];
     
-	unsigned int* gpu_pixel_idx[deviceCount]; //where each GPU starts considering pixels
-	unsigned int* gpu_pixel_length[devicecount]; //how many pixels the GPU computes
+	unsigned int gpu_pixel_idx[deviceCount]; //where each GPU starts considering pixels
+	unsigned int gpu_pixel_length[deviceCount]; //how many pixels the GPU computes
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 	{
 		unsigned int pixelblock_idx = npixelblocks_padded/deviceCount * gpuId;
@@ -294,7 +294,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 		chordParams d_cp = cp;
 		d_cp.thetas = d_thetas[gpuId];
 		dim3 nblocks (gpu_pixel_length[gpuId]/PIXELS_PER_BLOCK, nwavelengths_padded/32); //we want to call one block per 32 wavelengths
-		dirtymap_kernel<<<nblocks,THREADS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], precompute_array[gpuId]);
+		dirtymap_kernel<<<nblocks,PIXELS_PER_BLOCK>>>(d_u[gpuId], d_wavelengths[gpuId], d_source_positions[gpuId], d_source_spectra[gpuId], brightness_threshold, d_cp, d_dm[gpuId], precompute_array[gpuId]);
     }
 
     cudaDeviceSynchronize();

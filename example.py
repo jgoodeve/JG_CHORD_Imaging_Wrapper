@@ -118,6 +118,6 @@ if __name__ == "__main__":
         "ny": ny
     }
 
-    dmfile = open("dirtymap.pickle", "ab")
+    dmfile = open("dirtymap.pickle", "wb")
     pickle.dump(dmDict,dmfile)
     dmfile.close()

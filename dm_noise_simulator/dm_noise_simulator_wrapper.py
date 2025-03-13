@@ -10,12 +10,12 @@ cpp_dm_noise_sim_function.argtypes = \
     [ctypes.c_double, ndpointer(dtype=ctypes.c_double), ctypes.c_int,
     ndpointer(dtype=ctypes.c_double), ndpointer(dtype=ctypes.c_int), ctypes.c_int,
     ndpointer(dtype=ctypes.c_double), ctypes.c_int,
-    ctypes.c_float, ctypes.c_double, ctypes.c_int, 
+    ctypes.c_float, ctypes.c_double, ctypes.c_double, ctypes.c_int, 
     ndpointer(dtype=ctypes.c_double)]
     #noise, u, npixels,
     #baselines, baseline counts, nbaselines,
     #wavelengths, nwavelengths,
-    #telescope dec, dish diameter, ntimesamples
+    #telescope dec, dish diameter, deg_distance_to_count, ntimesamples
     #output noise map
 
 
@@ -28,6 +28,6 @@ def dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelength
     cpp_dm_noise_sim_function(noise, u_flattened, u_flattened.shape[0]//3,
                                baselines, baseline_counts, baselines.shape[0],
                                wavelengths, wavelengths.shape[0],
-                               dec, dish_diameter, ntimesamples,
+                               dec, dish_diameter, deg_distance_to_count, ntimesamples,
                                noise_map)
     return noise_map

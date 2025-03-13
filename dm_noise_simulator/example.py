@@ -81,13 +81,14 @@ if __name__ == "__main__":
     chord_dec = 49.322
     dish_diameter = 6 #m
     ang_resolution = 2 #deg
+    deg_distance_to_count = 8
     ntimesamples = int(360/ang_resolution)
     noise = not_autocorr_stdv(3600.0*24/ntimesamples) / 1000 #mJy
 
     u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
     u = u[:4]
     
-    dirtymap = dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelengths, chord_dec, dish_diameter, ntimesamples)
+    dirtymap = dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelengths, chord_dec, dish_diameter, deg_distance_to_count, ntimesamples)
     
     t2 = time.time()
     print("Dirtymap noise simulator took", t2-t1, "seconds")

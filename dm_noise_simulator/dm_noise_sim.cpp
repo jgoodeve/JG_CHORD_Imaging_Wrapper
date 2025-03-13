@@ -1,6 +1,7 @@
 //compiling line
 //g++ -fPIC -o dmns.so -shared dm_noise_sim.cpp -fopenmp
 
+#include <iostream>
 #include <random>
 #include <math.h> //sqrt
 #include <complex>
@@ -38,7 +39,7 @@ inline double Bsq_from_vecs (const double v1 [3], const double v2 [3], const dou
 
 extern "C" {void dm_noise_sim (double noise,
     const double* u, int npixels, const double* baselines, const int* baseline_counts, int nbaselines, const double* wavelengths, int nwavelengths,
-    double telescope_dec, double dish_diameter, int ntimesamples, double* noise_map)
+    double telescope_dec, double dish_diameter, double deg_distance_to_count, int ntimesamples_full, double* noise_map)
 {   
 	using namespace std::complex_literals;
 	
@@ -63,7 +64,7 @@ extern "C" {void dm_noise_sim (double noise,
     //making random visibility noise draws
     std::default_random_engine rng;
 
-    std::complex<double>* noise_draws = new std::complex<double>[nbaselines*ntimesamples*nwavelengths];
+    std::complex<double>* noise_draws = new std::complex<double>[nbaselines*ntimesamples_full*nwavelengths];
     double* inv_cov = new double [nbaselines];
     for (int i = 0; i < nbaselines; i++)
     {
@@ -78,33 +79,40 @@ extern "C" {void dm_noise_sim (double noise,
         std::normal_distribution<double> noise_distribution (0, stdv);
         for (int l = 0; l < nwavelengths; l++)
         {
-            for (int j = 0; j <  ntimesamples; j++)
+            for (int j = 0; j <  ntimesamples_full; j++)
             {
-                noise_draws[l*nbaselines*ntimesamples + i*ntimesamples+j] = noise_distribution(rng) + noise_distribution(rng)*1i;
+                noise_draws[l*nbaselines*ntimesamples_full + i*ntimesamples_full+j] = noise_distribution(rng) + noise_distribution(rng)*1i;
             }
         }
     }
     delete[] a;
     
+    //we don't want to actually count every time step, since the majority of them are 0 because of B_sq
+    int ntimesamples = int(ntimesamples_full * (2*deg_distance_to_count)/360.0);
+
+    std::cout << "Running noise simulator with " << omp_get_max_threads() << " threads." << std::endl;
     #pragma omp parallel for
     for (int j = 0; j < npixels; j++)
     {
-		for (int l = 0; l<nwavelengths; l++)
-		{
-		    std::complex<double> sum = 0;
-		    for (int i = 0; i < nbaselines; i++)
-		    {
-		        for (int t = 0; t < ntimesamples; t++)
-		        {
-		            double phi = (2*PI/ntimesamples)*t;
-		            double u_rot [3];
-		            rotate(u+3*j, u_rot, phi);
-		            double Bsq = Bsq_from_vecs (u_rot, zenith_basis, wavelengths[l], dish_diameter);
-		            sum += inv_cov[i]*noise_draws[i*ntimesamples+t]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(baselines+i*3,u_rot));
-		        }
-		    }
-		    noise_map[j*nwavelengths+l] = sum.real() + sum.imag();
-		}
-	}
+        double pixelphi = atan2(*(u+3*j),*(u+3*j+1));
+        int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
+        int t_initial = rough_time_placement-ntimesamples/2;
+        for (int l = 0; l<nwavelengths; l++)
+        {
+        std::complex<double> sum = 0;
+		for (int i = 0; i < nbaselines; i++)
+        {
+            for (int t = t_initial; t < t_initial+ntimesamples; t++)
+            {
+                double delta_phi = (2*PI/ntimesamples_full)*t;
+                double u_rot [3];
+                rotate(u+3*j, u_rot, delta_phi);
+                double Bsq = Bsq_from_vecs (u_rot, zenith_basis, wavelengths[l], dish_diameter);
+                sum += inv_cov[i]*noise_draws[i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(baselines+i*3,u_rot));
+            }
+        }
+        noise_map[j*nwavelengths+l] = sum.real() + sum.imag();
+        }
+    }
 }
 }

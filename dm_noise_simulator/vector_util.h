@@ -1,3 +1,5 @@
+#include <math.h>
+
 inline void ang2vec (const double theta, const double phi, double outvec [3])
 {
     outvec[0] = sin(theta)*cos(phi);

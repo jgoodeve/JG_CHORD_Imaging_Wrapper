@@ -19,7 +19,7 @@ cpp_dm_noise_sim_function.argtypes = \
     #output noise map
 
 
-def dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelengths, dec, dish_diameter, ntimesamples):
+def dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelengths, dec, dish_diameter, deg_distance_to_count, ntimesamples):
     assert(baselines.shape[0] == baseline_counts.shape[0])
     assert(u.shape[1] == 3)
     assert(baselines.shape[1] == 2)

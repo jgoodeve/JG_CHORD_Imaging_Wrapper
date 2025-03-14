@@ -12,7 +12,7 @@ nframes=frequencies.shape[0]
 nx = dm_dict["nx"]
 ny = dm_dict["ny"]
 
-dm = dm.reshape([nx,ny,nframes])
+dm = dm.reshape([ny,nx,nframes])
 maxInArray = np.max(dm)
 
 if not os.path.exists("/tmp/animate"):

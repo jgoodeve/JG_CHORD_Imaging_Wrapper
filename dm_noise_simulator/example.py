@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import pickle
+import matplotlib.pyplot as plt
 
 from dm_noise_simulator_wrapper import dm_noise_simulator_wrapper
 from get_noise_distribution import not_autocorr_stdv
@@ -32,7 +33,6 @@ def ang2vec (theta,phi):
     return np.array([np.cos(phi)*np.sin(theta),np.sin(phi)*np.sin(theta), np.cos(theta)]).T
 
 def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
-    testvecs = np.empty([nx,ny,3])
     basevec = ang2vec(base_theta, base_phi)
     v1 = ang2vec(base_theta - np.pi/2, base_phi)
     v2 = np.cross(v1, basevec)
@@ -49,6 +49,14 @@ def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
     np.divide(testvecs[:,:,1],norms, testvecs[:,:,1])
     np.divide(testvecs[:,:,2],norms, testvecs[:,:,2])
     return testvecs
+
+def get_radec_pixelvecs (nx,ny, base_theta, base_phi, delta_theta, delta_phi):
+	vecs = np.empty([nx*ny,3])
+	phi_array = np.linspace(base_phi-delta_phi/2, base_phi+delta_phi/2, nx)
+	theta_array = np.linspace(base_theta-delta_theta/2, base_theta+delta_theta/2, ny)
+	for i in range(nx*ny):
+		vecs[i] = ang2vec(theta_array[i//nx], phi_array[i%nx])
+	return vecs
 
 channel_width = (1500-300)/6000 #MHz
 def get_coarse (freq):
@@ -85,8 +93,8 @@ if __name__ == "__main__":
     ntimesamples = int(360/ang_resolution)
     noise = not_autocorr_stdv(3600.0*24/ntimesamples) / 1000 #mJy
 
-    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
-    u = u[:4]
+    #u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
+    u = get_radec_pixelvecs (nx,ny, base_theta, base_phi, extent2, extent1)
     
     dirtymap = dm_noise_simulator_wrapper (noise, u, baselines, baseline_counts, wavelengths, chord_dec, dish_diameter, deg_distance_to_count, ntimesamples)
     

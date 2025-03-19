@@ -19,7 +19,7 @@ nframes=frequencies.shape[0]
 nx = dm_dict["nx"]
 ny = dm_dict["ny"]
 
-dm = dm.reshape([nx,ny,nframes])
+dm = dm.reshape([ny,nx,nframes])
 maxInArray = np.max(dm)
 
 if not os.path.exists("/tmp/animate"):
@@ -28,7 +28,7 @@ print("Plotting...")
 for i in range(nframes):
     plt.imshow(dm[:,:,i], vmin=0, vmax=maxInArray, interpolation="none", origin="lower")
     plt.title(f"Freq: {frequencies[i]:.4f} MHz")
-    plt.savefig("/tmp/animate/dm"+str(i)+".png")
+    plt.savefig("/tmp/animate/dm"+str(i)+".png", bbox_inches = 'tight', pad_inches = 0.5)
     plt.close()
     
     print("\x1b[2K",str((i+1)/nframes * 100)+"% complete", end='\r')

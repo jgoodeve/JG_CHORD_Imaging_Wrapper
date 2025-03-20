@@ -99,18 +99,18 @@ extern "C" {void dm_noise_sim (double noise,
         int t_initial = rough_time_placement-ntimesamples/2;
         for (int l = 0; l<nwavelengths; l++)
         {
-        std::complex<double> sum = 0;
-		for (int i = 0; i < nbaselines; i++)
-        {
-            for (int t = t_initial; t < t_initial+ntimesamples; t++)
-            {
-                double delta_phi = (2*PI/ntimesamples_full)*t;
-                double u_rot [3];
-                rotate(u+3*j, u_rot, delta_phi);
-                double Bsq = Bsq_from_vecs (u_rot, zenith_basis, wavelengths[l], dish_diameter);
-                sum += inv_cov[i]*noise_draws[i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(baselines+i*3,u_rot));
-            }
-        }
+		    std::complex<double> sum = 0;
+			for (int i = 0; i < nbaselines; i++)
+		    {
+		        for (int t = t_initial; t < t_initial+ntimesamples; t++)
+		        {
+		            double delta_phi = (2*PI/ntimesamples_full)*t;
+		            double u_rot [3];
+		            rotate(u+3*j, u_rot, delta_phi);
+		            double Bsq = Bsq_from_vecs (u_rot, zenith_basis, wavelengths[l], dish_diameter);
+		            sum += inv_cov[i]*noise_draws[l*nbaselines*ntimesamples_full + i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(baselines+i*3,u_rot));
+		        }
+		    }
         noise_map[j*nwavelengths+l] = sum.real() + sum.imag();
         }
     }

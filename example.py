@@ -78,6 +78,14 @@ def get_tan_plane_pixelvecs (nx,ny, base_theta, base_phi, extent1, extent2):
     np.divide(testvecs[:,:,2],norms, testvecs[:,:,2])
     return testvecs
 
+def get_radec_pixelvecs (nx,ny, base_theta, base_phi, delta_theta, delta_phi):
+	vecs = np.empty([nx*ny,3])
+	phi_array = np.linspace(base_phi-delta_phi/2, base_phi+delta_phi/2, nx)
+	theta_array = np.linspace(base_theta-delta_theta/2, base_theta+delta_theta/2, ny)
+	for i in range(nx*ny):
+		vecs[i] = ang2vec(theta_array[i//nx], phi_array[i%nx])
+	return vecs
+
 omega = 2*np.pi/(3600*24)
 
 if __name__ == "__main__":
@@ -104,8 +112,8 @@ if __name__ == "__main__":
                      m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=41)
 
-    u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(np.float32)
-    #u = get_radec_pixelvecs(nx,ny)
+    #u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(np.float32)
+    u = get_radec_pixelvecs(nx, ny, base_theta, base_phi, delta_theta, delta_phi)
 
     dirtymap = dirtymap_simulator_wrapper (u, wavelengths, source_us, spectra, 0.01, cp)
     t2 = time.time()

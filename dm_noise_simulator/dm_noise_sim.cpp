@@ -85,7 +85,6 @@ extern "C" {void dm_noise_sim (double noise,
             }
         }
     }
-    delete[] a;
     
     //we don't want to actually count every time step, since the majority of them are 0 because of B_sq
     int ntimesamples = int(ntimesamples_full * (2*deg_distance_to_count)/360.0);
@@ -108,11 +107,71 @@ extern "C" {void dm_noise_sim (double noise,
 		            double u_rot [3];
 		            rotate(u+3*j, u_rot, delta_phi);
 		            double Bsq = Bsq_from_vecs (u_rot, zenith_basis, wavelengths[l], dish_diameter);
-		            sum += inv_cov[i]*noise_draws[l*nbaselines*ntimesamples_full + i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(baselines+i*3,u_rot));
+		            sum += inv_cov[i]*noise_draws[l*nbaselines*ntimesamples_full + i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(a+i*3,u_rot));
 		        }
 		    }
         noise_map[j*nwavelengths+l] = sum.real() + sum.imag();
         }
     }
+    delete[] a;
+}
+}
+
+extern "C" {void dm_noise_sim_instantaneous (double noise,
+    const double* u, int npixels, const double* baselines, const int* baseline_counts, int nbaselines, double wavelength,
+    double telescope_dec, double dish_diameter, double* noise_map)
+{   
+	using namespace std::complex_literals;
+	
+    double telescope_theta = (90-telescope_dec)*PI/180;
+
+    //making unit vector baselines
+    double zenith_basis [3];
+    double ns_basis [3];
+    double ew_basis [3];
+    ang2vec(telescope_theta,0,zenith_basis);
+    ang2vec(telescope_theta-PI/2,0,ns_basis);
+    cross(ns_basis,zenith_basis,ew_basis);
+
+    double* a = new double [3*nbaselines];
+    for (int i = 0; i < nbaselines; i++)
+    {
+        a[3*i+0] = baselines[2*i]*ew_basis[0] + baselines[2*i+1]*ns_basis[0];
+        a[3*i+1] = baselines[2*i]*ew_basis[1] + baselines[2*i+1]*ns_basis[1];
+        a[3*i+2] = baselines[2*i]*ew_basis[2] + baselines[2*i+1]*ns_basis[2];
+    }
+
+    //making random visibility noise draws
+    std::default_random_engine rng;
+
+    std::complex<double>* noise_draws = new std::complex<double>[nbaselines];
+    double* inv_cov = new double [nbaselines];
+    for (int i = 0; i < nbaselines; i++)
+    {
+        double stdv;
+        if (baselines[2*i] == 0 && baselines[2*i+1] == 0)
+        {
+            stdv = sqrt(baseline_counts[i])*noise * sqrt(2)/2;
+        }
+        else
+            stdv = sqrt(baseline_counts[i])*noise;
+        inv_cov[i] = 1/(stdv*stdv);
+        std::normal_distribution<double> noise_distribution (0, stdv);
+        noise_draws[i] = noise_distribution(rng) + noise_distribution(rng)*1i;
+    }
+
+    std::cout << "Running noise simulator with " << omp_get_max_threads() << " threads." << std::endl;
+    #pragma omp parallel for
+    for (int j = 0; j < npixels; j++)
+    {
+	    std::complex<double> sum = 0;
+		for (int i = 0; i < nbaselines; i++)
+	    {
+	    	double Bsq = Bsq_from_vecs (u+3*j, zenith_basis, wavelength, dish_diameter);
+	        sum += inv_cov[i]*noise_draws[i]*Bsq*exp(-2*PI*1i/wavelength*dot(a+i*3,u+3*j));
+	    }
+        noise_map[j] = sum.real() + sum.imag();
+    }
+    delete[] a;
 }
 }

@@ -137,19 +137,17 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
             float usum = 0;
             for (unsigned int s = 0; s*wavelengths.l < source_spectra.l; s++)
             {
-                float combined_source_sum = 0;
+            	float time_sum = 0;
                 if (source_spectra.p[s*wavelengths.l + l] > brightness_threshold)
                 {
-     		    float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
+     		    	float source_phi = atan2f(source_positions.p[s*3+1],source_positions.p[s*3]);
                     float initial_travelangle = -source_phi-cp.initial_phi_offset; //we want it to start computing phi_offset away from the source
-		    float normalization_sum = 0;
-		    float individual_source_sum = 0;
-		    for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
+		    		for (unsigned int k = 0; k < cp.thetas.l && k < MAX_DITHERS; k++)
                     {
-		            const float * chord_pointing = precompute_array + 10*k;
-		            const float * dir1_proj_vec  = precompute_array + 10*k+3;
-		            const float * dir2_proj_vec  = precompute_array + 10*k+6;
-		            const float L1_modified = *(precompute_array+10*k+9);
+		            	const float * chord_pointing = precompute_array + 10*k;
+		            	const float * dir1_proj_vec  = precompute_array + 10*k+3;
+		            	const float * dir2_proj_vec  = precompute_array + 10*k+6;
+		            	const float L1_modified = *(precompute_array+10*k+9);
                         for (unsigned int j = 0; j < cp.time_samples; j++)
                         {
                             float travelangle = initial_travelangle+j*cp.delta_tau*omega;
@@ -164,15 +162,13 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
                             float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
                             float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing, wavelengths.p[l], cp.D);
 
-			    normalization_sum += Bsq_source * Bsq_u;
-                            individual_source_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
+							time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
                         }
                     }
-		    combined_source_sum += individual_source_sum/normalization_sum;
                 }
-                usum += source_spectra.p[s*wavelengths.l + l] * combined_source_sum;
+                usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
-            dm[pixelIdx*wavelengths.l + l] = usum/(cp.m1*cp.m1*cp.m2*cp.m2); //normalizing by the number of dishes
+            dm[pixelIdx*wavelengths.l + l] = usum;
         }
     }
 }

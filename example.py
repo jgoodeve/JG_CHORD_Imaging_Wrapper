@@ -113,7 +113,7 @@ if __name__ == "__main__":
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=41)
 
     #u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(np.float32)
-    u = get_radec_pixelvecs(nx, ny, base_theta, base_phi, delta_theta, delta_phi)
+    u = get_radec_pixelvecs(nx, ny, base_theta, base_phi, extent2, extent1).astype(np.float32)
 
     dirtymap = dirtymap_simulator_wrapper (u, wavelengths, source_us, spectra, 0.01, cp)
     t2 = time.time()

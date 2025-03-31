@@ -22,6 +22,7 @@ class chordParams(ctypes.Structure):
                 ("L2", ctypes.c_float),
                 ("CHORD_zenith_dec", ctypes.c_float),
                 ("D", ctypes.c_float),
+                ("noise", ctypes.c_float),
                 ("delta_tau", ctypes.c_float),
                 ("time_samples", ctypes.c_uint)]
 

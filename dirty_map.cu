@@ -28,6 +28,7 @@ struct chordParams
     float L2; //east west
     float CHORD_zenith_dec;
     float D; //dish diameter
+    float noise;
     float delta_tau;
     unsigned int time_samples;
 };
@@ -161,14 +162,15 @@ __global__ void dirtymap_kernel (const floatArray u, const floatArray wavelength
 
                             float Bsq_source = Bsq_from_vecs(source_rot, chord_pointing, wavelengths.p[l], cp.D);
                             float Bsq_u = Bsq_from_vecs(u_rot, chord_pointing, wavelengths.p[l], cp.D);
+							float autocorr_contribution = cp.m1*cp.m2*Bsq_source*Bsq_u;
 
-							time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2);
+							time_sum += Bsq_source * Bsq_u * sin_sq_ratio(cp.m1,cdir1) * sin_sq_ratio(cp.m2,cdir2) - autocorr_contribution;
                         }
                     }
                 }
                 usum += source_spectra.p[s*wavelengths.l + l] * time_sum;
             }
-            dm[pixelIdx*wavelengths.l + l] = usum;
+            dm[pixelIdx*wavelengths.l + l] = usum/(cp.noise*cp.noise); //multiplying by covariance matrix
         }
     }
 }

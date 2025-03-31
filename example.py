@@ -109,7 +109,7 @@ if __name__ == "__main__":
     chord_thetas = np.asarray([np.deg2rad(90-49.322)], dtype=np.float32)
     cp = chordParams(thetas = unpackArraytoStruct(chord_thetas),
                     initial_phi_offset = np.deg2rad(10),
-                     m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0,
+                     m1=22, m2=24, L1=8.5, L2=6.3, chord_zenith_dec = 49.322, D = 6.0, noise = 6.2522,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=41)
 
     #u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3]).astype(np.float32)

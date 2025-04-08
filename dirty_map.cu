@@ -116,10 +116,10 @@ __global__ void precompute (float * precomputed_array, const chordParams cp)
 		float * chord_pointing = precomputed_array + 10*i; //calculating baseline unit vectors
 		float * dir1_proj_vec  = precomputed_array + 10*i+3;
 		float * dir2_proj_vec  = precomputed_array + 10*i+6;
-	        float * L1_modified = precomputed_array+10*i+9; //accounting for CHORD's baseline shrinking when it points away from zenith
+	    float * L1_modified = precomputed_array+10*i+9; //accounting for CHORD's baseline shrinking when it points away from zenith
 		ang2vec(cp.thetas.p[i], 0, chord_pointing);
-	        ang2vec(cp.thetas.p[i] + PI/2, 0, dir1_proj_vec);
-   	        cross(dir1_proj_vec, chord_pointing, dir2_proj_vec);
+	    ang2vec(cp.thetas.p[i] + PI/2, 0, dir1_proj_vec);
+   	    cross(dir1_proj_vec, chord_pointing, dir2_proj_vec);
 		*L1_modified = cp.L1*cosf(PI/180*(90-cp.CHORD_zenith_dec) - cp.thetas.p[i]);
 	}
 }
@@ -269,9 +269,9 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
 		cudaMalloc(&(d_dm[gpuId]), sizeof(float)*gpu_pixel_length[gpuId]*wavelengths_padded.l);
     }
     cudaDeviceSynchronize();
-    delete u_padded; //we don't need this anymore I think, making sure we sync before deleting
-    delete wavelengths_padded.p;
-    delete source_spectra_padded.p;
+    delete[] u_padded; //we don't need this anymore I think, making sure we sync before deleting
+    delete[] wavelengths_padded.p;
+    delete[] source_spectra_padded.p;
 
     cudaError_t copying_err = cudaGetLastError();
     if (copying_err != cudaSuccess) std::cout << "Error from copying: " << copying_err << std::endl;
@@ -321,7 +321,7 @@ extern "C" {void dirtymap_caller(const floatArray u, const floatArray wavelength
     {
 		for (unsigned int j = 0; j < wavelengths.l; j++) dm[i*wavelengths.l+j] = dm_padded[i*wavelengths_padded.l+j];
     }
-    delete dm_padded;
+    delete[] dm_padded;
 }
 }
 

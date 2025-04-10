@@ -110,7 +110,7 @@ extern "C" {void dm_noise_sim (double noise,
 		            sum += inv_cov[i]*noise_draws[l*nbaselines*ntimesamples_full + i*ntimesamples_full+t%ntimesamples_full]*Bsq*exp(-2*PI*1i/wavelengths[l]*dot(a+i*3,u_rot));
 		        }
 		    }
-        noise_map[j*nwavelengths+l] = sum.real() + sum.imag();
+        noise_map[j*nwavelengths+l] = sum.real();
         }
     }
     delete[] a;
@@ -170,7 +170,7 @@ extern "C" {void dm_noise_sim_instantaneous (double noise,
 	    	double Bsq = Bsq_from_vecs (u+3*j, zenith_basis, wavelength, dish_diameter);
 	        sum += inv_cov[i]*noise_draws[i]*Bsq*exp(-2*PI*1i/wavelength*dot(a+i*3,u+3*j));
 	    }
-        noise_map[j] = sum.real() + sum.imag();
+        noise_map[j] = sum.real();
     }
     delete[] a;
 }

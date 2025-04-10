@@ -13,41 +13,43 @@ typedef struct
 	float z;
 } vector3;
 
-__device__ void fill_noise_draws (float* noise_draws, int n, float noise, unsigned long long seed)
+__device__ void fill_noise_draws (float* noise_draws, int ndraws, int ntimesamples, float* stdv, unsigned long long seed)
 {
 	int idx = threadIdx.x + blockIdx.x *32;
 	curandStateMRG32k3a_t state;
 	curand_init(seed, idx, 0, &state);
-	if (idx < n)
+	if (idx < ndraws)
 	{
-		noise_draws[idx] = curand_normal(&state);
+		noise_draws[idx] = curand_normal(&state)*stdv[idx/(ntimesamples*2)];
 	}
 }
 
-inline void ang2vec (const double theta, const double phi, double outvec [3])
+inline vector3 ang2vec (const double theta, const double phi)
 {
-    outvec[0] = sin(theta)*cos(phi);
-    outvec[1] = sin(theta)*sin(phi);
-    outvec[2] = cos(theta);
+	return {sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)};
 }
 
-inline void cross (const double v1 [3], const double v2 [3], double outvec [3])
+inline vector3 cross (const vector3 v1, const vector3 v2)
 {
-    outvec[0] = v1[1]*v2[2]-v1[2]*v2[1];
-    outvec[1] = v1[2]*v2[0]-v1[0]*v2[2];
-    outvec[2] = v1[0]*v2[1]-v1[1]*v2[0]; 
+	return {v1.y*v2.z-v1.z*v2.y,
+			v1.z*v2.x-v1.x*v2.z,
+			v1.x*v2.y-v1.y*v2.x};
 }
 
-__device__ inline void rotate (const float v [3], float outvec [3], const float alpha)
+__device__ inline vector3 rotate (const vector3 v, const float alpha)
 {
-    outvec[0] = cosf(alpha)*v[0] - sinf(alpha)*v[1];
-    outvec[1] = sinf(alpha)*v[0] + cosf(alpha)*v[1];
-    outvec[2] = v[2];
+	return {cosf(alpha)*v.x - sinf(alpha)*v.y, sinf(alpha)*v.x + cosf(alpha)*v.y, v.z};
 }
 
-__device__ inline float dot (const float v1 [3], const float v2 [3])
+__device__ inline float dot (const vector3 v1, const vector3 v2)
 {
-    return v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2];
+    return v1.x*v2.x+v1.y*v2.y+v1.z*v2.z;
+}
+
+__device__ inline float angular_difference (const vector3 v1, const vector3 v2)
+{
+	vector3 c = cross(v1, v2);
+	return atan2f(sqrtf(dot(c,c)), dot(v1,v2));
 }
 
 __device__ float B_sq (const float alpha, const float wavelength, const float D)
@@ -59,26 +61,8 @@ __device__ float B_sq (const float alpha, const float wavelength, const float D)
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
 }
 
-__device__ inline float Bsq_from_vecs (const float v1 [3], const float v2 [3], const float wavelength, const float D)
-{
-    float dp = dot(v1,v2);
-    if (dp <= 0) return 0; //horizon condition
-    else
-    {
-        //we want to deal with the arccos instiblity by using the cross product formula instead
-        float delta_ang;
-        if (dp < 0.99f) delta_ang = acosf(dp);
-        else
-        {
-            delta_ang = asinf(crossmag(v1,v2));
-            //delta_ang = (dp > 0) ? delta_ang : PI-delta_ang; //I don't need this line with the horizon condition
-        }
-        return B_sq(delta_ang, wavelength, D);
-    }
-}
-
 __device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* inv_cov,
-    const float* u, const float* baselines, int nbaselines, float* wavelength,
+    const vector3* u, const vector3* baselines, int nbaselines, float* wavelength,
     vector3 telescope_u, float dish_diameter, float initial_phi_offset, int ntimesamples, float* noise_map)
 {
     int pixelidx = threadIdx.x + blockIdx.x*PIXELS_PER_BLOCK;
@@ -90,18 +74,17 @@ __device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws,
             for (int t = 0; t < ntimesamples; t++)
             {
                 float phi = -initial_phi_offset + (2*initial_phi_offset/ntimesamples)*t;
-                float u_rot [3];
-                rotate(u[3*pixelidx], u_rot, phi);
-                float Bsq = Bsq_from_vecs (u_rot, telescope_u, wavelengths[l], dish_diamater);
-                sum += inv_cov[i]*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1i/wavelengths[l]*dot(baselines[i*3],u_rot)); //this doesn't work because the noise draws won't match between us
+                vector3 u_rot = rotate(u[pixelidx], phi);
+                float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelengths[l], dish_diamater);
+                sum += inv_cov[i]*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1i/wavelengths[l]*dot(baselines[i],u_rot));
             }
         }
-        noise_map[pixelidx*nwavelengths+l] = sum.real() + sum.imag();
+        noise_map[pixelidx*nwavelengths+l] = sum.real();
     }
 }
 
 extern "C" {void dm_noise_sim_caller (float noise,
-    const float* u, unsigned int npixels, const float* baselines, const int* baseline_counts, int nbaselines, const float* wavelengths, int nwavelengths,
+    const vector3* u, unsigned int npixels, const float* baselines, const int* baseline_counts, int nbaselines, const float* wavelengths, int nwavelengths,
     float telescope_dec, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, float* noise_map, unsigned long long seed)
 {   
 	using namespace std::complex_literals;
@@ -109,19 +92,23 @@ extern "C" {void dm_noise_sim_caller (float noise,
     float telescope_theta = (90-telescope_dec)*PI/180;
 
     //making unit vector baselines
-    float zenith_basis [3];
-    float ns_basis [3];
-    float ew_basis [3];
-    ang2vec(telescope_theta,0,zenith_basis);
-    ang2vec(telescope_theta-PI/2,0,ns_basis);
-    cross(ns_basis,zenith_basis,ew_basis);
+    vector3 zenith_basis = ang2vec(telescope_theta,0);
+    vector3 ns_basis = ang2vec(telescope_theta-PI/2,0);
+    vector3 ew_basis = cross(ns_basis,zenith_basis);
 
-    float* a = new float [3*nbaselines];
+    vector3* a = new vector3 [nbaselines];
+    float* stdv = new float [nbaselines]; //setting up list of standard deviations for each baseline
     for (int i = 0; i < nbaselines; i++)
     {
-        a[3*i+0] = baselines[2*i]*ew_basis[0] + baselines[2*i+1]*ns_basis[0];
-        a[3*i+1] = baselines[2*i]*ew_basis[1] + baselines[2*i+1]*ns_basis[1];
-        a[3*i+2] = baselines[2*i]*ew_basis[2] + baselines[2*i+1]*ns_basis[2];
+        a[i] = {baselines[2*i]*ew_basis[0] + baselines[2*i+1]*ns_basis[0],
+         		baselines[2*i]*ew_basis[1] + baselines[2*i+1]*ns_basis[1],
+         		baselines[2*i]*ew_basis[2] + baselines[2*i+1]*ns_basis[2]};
+	    if (baselines[2*i] == 0 && baselines[2*i+1] == 0)
+	    {
+	        stdv[i] = sqrt(baseline_counts[i])*noise * sqrt(2)/2;
+	    }
+	    else
+	        stdv[i] = sqrt(baseline_counts[i])*noise;
     }
 
 	//setting up multiple GPUs and cuda stuff
@@ -141,34 +128,50 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		unsigned int pixelblock_length = gpuId + 1 == deviceCount ? npixelblocks_padded - pixelblock_idx : npixelblocks_padded/deviceCount;
 		gpu_pixel_length[gpuId] = pixelblock_length * PIXELS_PER_BLOCK;
 	}
-	float* u_padded = new float [npixels_padded*3];
-	for (unsigned int i = 0; i<npixels*3; i++) u_padded[i] = u[i];
+	vector3* u_padded = new vector3 [npixels_padded];
+	for (unsigned int i = 0; i<npixels; i++) u_padded = u[i];
 	for (unsigned int i = npixels; i < npixels_padded; i++)
     {
-		u_padded[3*i]   = 1;
-		u_padded[3*i+1] = 0;
-		u_padded[3*i+2] = 0;
+    	u_padded[i] = {1,0,0};
     }
-    float* u_d[deviceCount];
+    vector3* u_d[deviceCount];
     
 	float* padded_noise_map_d[deviceCount];
 	float* noise_draws[deviceCount];
 	float* a_d[deviceCount];
+	float* stdv_d[deviceCount];
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 	{
 		cudaSetDevice(gpuId);
-		cudaMalloc(&u_d[gpuId], sizeof(float)*gpu_pixel_length[gpuId]*3);
-		cudaMemcpyAsync(d_u[gpuId], u + gpu_pixel_idx[gpuId]*3, sizeof(float)*gpu_pixel_length[gpuId]*3, cudaMemcpyHostToDevice);
+		cudaMalloc(&u_d[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId]);
+		cudaMemcpyAsync(d_u[gpuId], u + gpu_pixel_idx[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId], cudaMemcpyHostToDevice);
 		cudaMalloc(&padded_noise_map_d[gpuId], sizeof(float)*gpu_pixel_length[gpuId]);
-		cudaMalloc(&noise_draws[gpuId], sizeof(float)*nbaselines*2);
-		cudaMalloc(&a_d[gpuId], sizeof(float)*nbaselines*3);
-		cudaMemcpyAsync(baselines_d[gpuId], a, sizeof(float)*nbaselines*3, cudaMemcpyHostToDevice);
+		cudaMalloc(&noise_draws[gpuId], sizeof(float)*nbaselines*ntimesamples_full*2);
+		cudaMalloc(&a_d[gpuId], sizeof(vector3)*nbaselines);
+		cudaMemcpyAsync(baselines_d[gpuId], a, sizeof(vector3)*nbaselines, cudaMemcpyHostToDevice);
+		cudaMalloc(&stdv_d[gpuId], sizeof(float)*nbaselines);
+		cudaMemcpyAsync(stdv_d[gpuId], stdv, sizeof(float)*nbaselines, cudaMemcpyHostToDevice);
 	}
 	delete[] u_padded;
 	delete[] a;
+	delete[] stdv;
 	for (int l = 0; l < nwavelengths; l++)
-	{
-		
+	{	
+		for (int gpuId = 0; gpuId < deviceCount; gpuId++)
+		{
+			cudaSetDevice(gpuId);
+			int nblocks = (2*nbaselines*ntimesamples_full + 31)/32;
+			fill_noise_draws <<<nblocks, 32>>> (noise_draws[gpuId], 2*nbaselines*ntimesamples_full, noise, seed);
+		}
+		cudaDeviceSynchronize();
+		for (int gpuId = 0; gpuId < deviceCount; gpuId++)
+		{
+			cudaSetDevice(gpuId);
+			int nblocks = gpu_pixel_length[gpuId]/PIXELS_PER_BLOCK;
+			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>>(noise_draws[gpuId]), float* inv_cov,
+    			const vector3* u, const vector3* baselines, int nbaselines, float* wavelength,
+    			vector3 telescope_u, float dish_diameter, float initial_phi_offset, int ntimesamples, float* noise_map);
+		}
 	}
 
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
@@ -179,31 +182,5 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		cudaFree(noise_draws[gpuId]);
 		cudaFree(a_d[gpuId]);
 	}
-	
-    //making random visibility noise draws
-    std::default_random_engine rng;
-
-    std::complex<float>* noise_draws = new std::complex<float>[nbaselines*ntimesamples_full*nwavelengths];
-    float* inv_cov = new float [nbaselines];
-    for (int i = 0; i < nbaselines; i++)
-    {
-        float stdv;
-        if (baselines[2*i] == 0 && baselines[2*i+1] == 0)
-        {
-            stdv = sqrt(baseline_counts[i])*noise * sqrt(2)/2;
-        }
-        else
-            stdv = sqrt(baseline_counts[i])*noise;
-        inv_cov[i] = 1/(stdv*stdv);
-        std::normal_distribution<float> noise_distribution (0, stdv);
-        for (int l = 0; l < nwavelengths; l++)
-        {
-            for (int j = 0; j <  ntimesamples; j++)
-            {
-                noise_draws[l*nbaselines*ntimesamples + i*ntimesamples+j] = noise_distribution(rng) + noise_distribution(rng)*1i;
-            }
-        }
-    }
-    
 }
 }

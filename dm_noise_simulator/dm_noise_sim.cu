@@ -13,11 +13,11 @@ typedef struct
 	float z;
 } vector3;
 
-__device__ void fill_noise_draws (float* noise_draws, int ndraws, int ntimesamples, float* stdv, unsigned long long seed)
+__device__ void fill_noise_draws (float* noise_draws, int ndraws, int ntimesamples, float* stdv, unsigned long long freq_idx, unsigned long long seed)
 {
 	int idx = threadIdx.x + blockIdx.x *32;
 	curandStateMRG32k3a_t state;
-	curand_init(seed, idx, 0, &state);
+	curand_init(seed, idx, freq_idx, &state);
 	if (idx < ndraws)
 	{
 		noise_draws[idx] = curand_normal(&state)*stdv[idx/(ntimesamples*2)];
@@ -61,26 +61,27 @@ __device__ float B_sq (const float alpha, const float wavelength, const float D)
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
 }
 
-__device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* inv_cov,
-    const vector3* u, const vector3* baselines, int nbaselines, float* wavelength,
-    vector3 telescope_u, float dish_diameter, float initial_phi_offset, int ntimesamples, float* noise_map)
+__device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* stdv,
+    const vector3* u, const vector3* baselines, int nbaselines, float wavelength,
+    vector3 telescope_u, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, int ntimesamples, float* noise_map)
 {
     int pixelidx = threadIdx.x + blockIdx.x*PIXELS_PER_BLOCK;
-    for (int l = blockIdx.y*nwavelenths_per_block; l<blockIdx.y*nwavelenths_per_block+32; l++)
+    float pixelphi = atan2f(*(u+3*j),*(u+3*j+1));
+    int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
+    int t_initial = rough_time_placement-ntimesamples/2;
+    std::complex<float> sum = 0;
+    for (int i = 0; i < nbaselines; i++)
     {
-        std::complex<float> sum = 0;
-        for (int i = 0; i < nbaselines; i++)
+    	float inv_cov = 1.0/(stdv[i]*stdv[i]);
+        for (int t = 0; t < ntimesamples; t++)
         {
-            for (int t = 0; t < ntimesamples; t++)
-            {
-                float phi = -initial_phi_offset + (2*initial_phi_offset/ntimesamples)*t;
-                vector3 u_rot = rotate(u[pixelidx], phi);
-                float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelengths[l], dish_diamater);
-                sum += inv_cov[i]*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1i/wavelengths[l]*dot(baselines[i],u_rot));
-            }
+            float phi = -initial_phi_offset + (2*initial_phi_offset/ntimesamples)*t;
+            vector3 u_rot = rotate(u[pixelidx], phi);
+            float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelength, dish_diamater);
+            sum += inv_cov*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1i/wavelength*dot(baselines[i],u_rot));
         }
-        noise_map[pixelidx*nwavelengths+l] = sum.real();
     }
+    noise_map[pixelidx] = sum.real();
 }
 
 extern "C" {void dm_noise_sim_caller (float noise,
@@ -155,25 +156,42 @@ extern "C" {void dm_noise_sim_caller (float noise,
 	delete[] u_padded;
 	delete[] a;
 	delete[] stdv;
+	float* padded_noise_map = new float [npixels_padded*nwavelengths];
 	for (int l = 0; l < nwavelengths; l++)
 	{	
 		for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 		{
 			cudaSetDevice(gpuId);
 			int nblocks = (2*nbaselines*ntimesamples_full + 31)/32;
-			fill_noise_draws <<<nblocks, 32>>> (noise_draws[gpuId], 2*nbaselines*ntimesamples_full, noise, seed);
+			fill_noise_draws <<<nblocks, 32>>> (noise_draws[gpuId], 2*nbaselines*ntimesamples_full, stdv_d[gpuId], l, seed);
 		}
 		cudaDeviceSynchronize();
 		for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 		{
 			cudaSetDevice(gpuId);
 			int nblocks = gpu_pixel_length[gpuId]/PIXELS_PER_BLOCK;
-			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>>(noise_draws[gpuId]), float* inv_cov,
-    			const vector3* u, const vector3* baselines, int nbaselines, float* wavelength,
-    			vector3 telescope_u, float dish_diameter, float initial_phi_offset, int ntimesamples, float* noise_map);
+			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>>(noise_draws[gpuId]), stdv_d[gpuId],
+    			u_d[gpuId], a_d[gpuId], nbaselines, wavelengths[l],
+    			zenith_basis, dish_diameter, deg_distance_to_count, ntimesamples_full, ntimesamples, padded_noise_map_d);
+		}
+		cudaDeviceSynchronize();
+		//note the way this is written, it's nwavelengths*npixels instead of npixels*nwavelengths like the other code. Maybe I can fix this while unpadding.
+		for (int gpuId = 0; gpuId <  deviceCount; gpuId++)
+		{
+			cudaMemcpyAsync(padded_noise_map+l*npixels_padded + gpu_pixel_idx[gpuId], padded_noise_map_d[gpuId], sizeof(float)*gpu_pixel_length[gpuId], cudaMemcpyDeviceToHost);
+		}
+		cudaDeviceSynchronize();
+	}
+	
+	//last we just do unpadding and transpose on the CPU
+	for (unsigned int i = 0; i<npixels; i++)
+	{
+		for (unsigned int l = 0; l<nwavelengths; l++)
+		{
+			noise_map[i*nwavelengths+l] = padded_noise_map[l*npixels_padded+i];
 		}
 	}
-
+	delete[] padded_noise_map;
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 	{
 		cudaSetDevice(gpuId);

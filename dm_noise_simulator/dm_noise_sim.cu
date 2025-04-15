@@ -1,9 +1,10 @@
 //compile line: nvcc --shared -o gpu_dmns.so --compiler-options -fPIC dm_noise_sim.cu
+#include <iostream>
 #include <curand_kernel.h>
 #include <math.h> //sqrt
 #include <complex>
 
-#define PI 3.14159265358979323846
+#define PI 3.14159265358979323846f
 #define PIXELS_PER_BLOCK 128
 
 typedef struct
@@ -13,18 +14,20 @@ typedef struct
 	float z;
 } vector3;
 
-__device__ void fill_noise_draws (float* noise_draws, int ndraws, int ntimesamples, float* stdv, unsigned long long freq_idx, unsigned long long seed)
+__global__ void fill_noise_draws (std::complex<float>* noise_draws, int nbaselines, int ntimesamples, float* stdv, unsigned long long freq_idx, unsigned long long seed)
 {
+	using namespace std::complex_literals;
+
 	int idx = threadIdx.x + blockIdx.x *32;
 	curandStateMRG32k3a_t state;
-	curand_init(seed, idx, freq_idx, &state);
-	if (idx < ndraws)
+	curand_init(seed, idx+freq_idx*nbaselines*ntimesamples, 0, &state);
+	if (idx < nbaselines*ntimesamples)
 	{
-		noise_draws[idx] = curand_normal(&state)*stdv[idx/(ntimesamples*2)];
+		noise_draws[idx] = (curand_normal(&state)+curand_normal(&state)*1if)*stdv[idx/(ntimesamples*2)];
 	}
 }
 
-inline vector3 ang2vec (const double theta, const double phi)
+inline vector3 ang2vec (const float theta, const float phi)
 {
 	return {sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)};
 }
@@ -61,24 +64,26 @@ __device__ float B_sq (const float alpha, const float wavelength, const float D)
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
 }
 
-__device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* stdv,
+__global__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* stdv,
     const vector3* u, const vector3* baselines, int nbaselines, float wavelength,
     vector3 telescope_u, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, int ntimesamples, float* noise_map)
 {
-    int pixelidx = threadIdx.x + blockIdx.x*PIXELS_PER_BLOCK;
-    float pixelphi = atan2f(*(u+3*j),*(u+3*j+1));
+	using namespace std::complex_literals;
+    
+	int pixelidx = threadIdx.x + blockIdx.x*PIXELS_PER_BLOCK;
+    float pixelphi = atan2f(u[pixelidx].x, u[pixelidx].y);
     int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
     int t_initial = rough_time_placement-ntimesamples/2;
     std::complex<float> sum = 0;
     for (int i = 0; i < nbaselines; i++)
     {
     	float inv_cov = 1.0/(stdv[i]*stdv[i]);
-        for (int t = 0; t < ntimesamples; t++)
+        for (int t = t_initial; t < t_initial+ntimesamples; t++)
         {
-            float phi = -initial_phi_offset + (2*initial_phi_offset/ntimesamples)*t;
-            vector3 u_rot = rotate(u[pixelidx], phi);
-            float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelength, dish_diamater);
-            sum += inv_cov*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1i/wavelength*dot(baselines[i],u_rot));
+            float delta_phi = (2*PI/ntimesamples_full)*t;
+            vector3 u_rot = rotate(u[pixelidx], delta_phi);
+            float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelength, dish_diameter);
+            sum += inv_cov*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1if/wavelength*dot(baselines[i],u_rot));
         }
     }
     noise_map[pixelidx] = sum.real();
@@ -87,9 +92,7 @@ __device__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws,
 extern "C" {void dm_noise_sim_caller (float noise,
     const vector3* u, unsigned int npixels, const float* baselines, const int* baseline_counts, int nbaselines, const float* wavelengths, int nwavelengths,
     float telescope_dec, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, float* noise_map, unsigned long long seed)
-{   
-	using namespace std::complex_literals;
-	
+{
     float telescope_theta = (90-telescope_dec)*PI/180;
 
     //making unit vector baselines
@@ -101,9 +104,9 @@ extern "C" {void dm_noise_sim_caller (float noise,
     float* stdv = new float [nbaselines]; //setting up list of standard deviations for each baseline
     for (int i = 0; i < nbaselines; i++)
     {
-        a[i] = {baselines[2*i]*ew_basis[0] + baselines[2*i+1]*ns_basis[0],
-         		baselines[2*i]*ew_basis[1] + baselines[2*i+1]*ns_basis[1],
-         		baselines[2*i]*ew_basis[2] + baselines[2*i+1]*ns_basis[2]};
+        a[i] = {baselines[2*i]*ew_basis.x + baselines[2*i+1]*ns_basis.x,
+         		baselines[2*i]*ew_basis.y + baselines[2*i+1]*ns_basis.y,
+         		baselines[2*i]*ew_basis.z + baselines[2*i+1]*ns_basis.z};
 	    if (baselines[2*i] == 0 && baselines[2*i+1] == 0)
 	    {
 	        stdv[i] = sqrt(baseline_counts[i])*noise * sqrt(2)/2;
@@ -111,6 +114,9 @@ extern "C" {void dm_noise_sim_caller (float noise,
 	    else
 	        stdv[i] = sqrt(baseline_counts[i])*noise;
     }
+
+	//we don't want to actually count every time step, since the majority of them are 0 because of B_sq
+    int ntimesamples = int(ntimesamples_full * (2*deg_distance_to_count)/360.0);
 
 	//setting up multiple GPUs and cuda stuff
 	int deviceCount;
@@ -130,7 +136,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		gpu_pixel_length[gpuId] = pixelblock_length * PIXELS_PER_BLOCK;
 	}
 	vector3* u_padded = new vector3 [npixels_padded];
-	for (unsigned int i = 0; i<npixels; i++) u_padded = u[i];
+	for (unsigned int i = 0; i<npixels; i++) u_padded[i] = u[i];
 	for (unsigned int i = npixels; i < npixels_padded; i++)
     {
     	u_padded[i] = {1,0,0};
@@ -138,18 +144,18 @@ extern "C" {void dm_noise_sim_caller (float noise,
     vector3* u_d[deviceCount];
     
 	float* padded_noise_map_d[deviceCount];
-	float* noise_draws[deviceCount];
-	float* a_d[deviceCount];
+	std::complex<float>* noise_draws[deviceCount];
+	vector3* a_d[deviceCount];
 	float* stdv_d[deviceCount];
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 	{
 		cudaSetDevice(gpuId);
 		cudaMalloc(&u_d[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId]);
-		cudaMemcpyAsync(d_u[gpuId], u + gpu_pixel_idx[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId], cudaMemcpyHostToDevice);
+		cudaMemcpyAsync(u_d[gpuId], u + gpu_pixel_idx[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId], cudaMemcpyHostToDevice);
 		cudaMalloc(&padded_noise_map_d[gpuId], sizeof(float)*gpu_pixel_length[gpuId]);
-		cudaMalloc(&noise_draws[gpuId], sizeof(float)*nbaselines*ntimesamples_full*2);
+		cudaMalloc(&noise_draws[gpuId], sizeof(std::complex<float>)*nbaselines*ntimesamples_full);
 		cudaMalloc(&a_d[gpuId], sizeof(vector3)*nbaselines);
-		cudaMemcpyAsync(baselines_d[gpuId], a, sizeof(vector3)*nbaselines, cudaMemcpyHostToDevice);
+		cudaMemcpyAsync(a_d[gpuId], a, sizeof(vector3)*nbaselines, cudaMemcpyHostToDevice);
 		cudaMalloc(&stdv_d[gpuId], sizeof(float)*nbaselines);
 		cudaMemcpyAsync(stdv_d[gpuId], stdv, sizeof(float)*nbaselines, cudaMemcpyHostToDevice);
 	}
@@ -163,16 +169,16 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		{
 			cudaSetDevice(gpuId);
 			int nblocks = (2*nbaselines*ntimesamples_full + 31)/32;
-			fill_noise_draws <<<nblocks, 32>>> (noise_draws[gpuId], 2*nbaselines*ntimesamples_full, stdv_d[gpuId], l, seed);
+			fill_noise_draws <<<nblocks, 32>>> (noise_draws[gpuId], nbaselines, ntimesamples_full, stdv_d[gpuId], l, seed);
 		}
 		cudaDeviceSynchronize();
 		for (int gpuId = 0; gpuId < deviceCount; gpuId++)
 		{
 			cudaSetDevice(gpuId);
 			int nblocks = gpu_pixel_length[gpuId]/PIXELS_PER_BLOCK;
-			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>>(noise_draws[gpuId]), stdv_d[gpuId],
+			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>*>(noise_draws[gpuId]), stdv_d[gpuId],
     			u_d[gpuId], a_d[gpuId], nbaselines, wavelengths[l],
-    			zenith_basis, dish_diameter, deg_distance_to_count, ntimesamples_full, ntimesamples, padded_noise_map_d);
+    			zenith_basis, dish_diameter, deg_distance_to_count, ntimesamples_full, ntimesamples, padded_noise_map_d[gpuId]);
 		}
 		cudaDeviceSynchronize();
 		//note the way this is written, it's nwavelengths*npixels instead of npixels*nwavelengths like the other code. Maybe I can fix this while unpadding.

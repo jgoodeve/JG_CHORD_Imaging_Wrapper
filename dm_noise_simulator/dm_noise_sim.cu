@@ -18,12 +18,12 @@ class myComplex
 	public:
 		float real;
 		float imag;
-	__global__ myComplex(float real_, float imag_)
+	__device__ myComplex(float real_, float imag_)
 	{
 		real = real_;
 		imag = imag_;
 	}
-	myComplex& operator+= (const myComplex& rhs)
+	__device__ myComplex& operator+= (const myComplex& rhs)
 	{
 		real += rhs.real;
 		imag += rhs.imag;
@@ -31,10 +31,11 @@ class myComplex
 	}
 };
 
-__global__ inline myComplex operator* (const float a, const myComplex b) {return myComplex(b.real*a, b.imag*a)};
-__global__ inline myComplex operator* (const myComplex b, const float a) {return myComplex(b.real*a, b.imag*a)};
+__device__  myComplex operator* (const float a, const myComplex b) {return myComplex(b.real*a, b.imag*a);}
+__device__  myComplex operator* (const myComplex b, const float a) {return myComplex(b.real*a, b.imag*a);}
+__device__  myComplex operator* (const myComplex a, const myComplex b) {return myComplex(a.real*b.real-a.imag*b.imag, a.real*b.imag+a.imag*b.real);}
 
-__device__ exp (myComplex x)
+__device__ myComplex exp (myComplex x)
 {
 	return expf(x.real)*myComplex(sinf(x.imag),cosf(x.imag));
 }
@@ -55,7 +56,7 @@ inline vector3 ang2vec (const float theta, const float phi)
 	return {sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)};
 }
 
-inline vector3 cross (const vector3 v1, const vector3 v2)
+__host__ __device__ inline vector3 cross (const vector3 v1, const vector3 v2)
 {
 	return {v1.y*v2.z-v1.z*v2.y,
 			v1.z*v2.x-v1.x*v2.z,
@@ -87,7 +88,7 @@ __device__ float B_sq (const float alpha, const float wavelength, const float D)
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
 }
 
-__global__ void dm_noise_sim (const myComplex<float>* visibility_noise_draws, float* stdv,
+__global__ void dm_noise_sim (const myComplex* visibility_noise_draws, float* stdv,
     const vector3* u, const vector3* baselines, int nbaselines, float wavelength,
     vector3 telescope_u, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, int ntimesamples, float* noise_map)
 {   
@@ -95,7 +96,7 @@ __global__ void dm_noise_sim (const myComplex<float>* visibility_noise_draws, fl
     float pixelphi = atan2f(u[pixelidx].x, u[pixelidx].y);
     int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
     int t_initial = rough_time_placement-ntimesamples/2;
-    myComplex sum = 0;
+    myComplex sum(0,0);
     for (int i = 0; i < nbaselines; i++)
     {
     	float inv_cov = 1.0/(stdv[i]*stdv[i]);
@@ -146,7 +147,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
 	
 	//padding
 	unsigned int npixelblocks_padded = (npixels+PIXELS_PER_BLOCK-1)/PIXELS_PER_BLOCK;
-	int npixels_padded = npixelblocks_padded*PIXELS_PER_BLOCK;
+	unsigned int npixels_padded = npixelblocks_padded*PIXELS_PER_BLOCK;
 	unsigned int gpu_pixel_idx[deviceCount]; //where each GPU starts considering pixels
 	unsigned int gpu_pixel_length[deviceCount]; //how many pixels the GPU computes
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
@@ -213,7 +214,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
 	//last we just do unpadding and transpose on the CPU
 	for (unsigned int i = 0; i<npixels; i++)
 	{
-		for (unsigned int l = 0; l<nwavelengths; l++)
+		for (int l = 0; l<nwavelengths; l++)
 		{
 			noise_map[i*nwavelengths+l] = padded_noise_map[l*npixels_padded+i];
 		}

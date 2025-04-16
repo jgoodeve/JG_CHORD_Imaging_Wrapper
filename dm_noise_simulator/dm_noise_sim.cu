@@ -2,7 +2,6 @@
 #include <iostream>
 #include <curand_kernel.h>
 #include <math.h> //sqrt
-#include <complex>
 
 #define PI 3.14159265358979323846f
 #define PIXELS_PER_BLOCK 128
@@ -14,16 +13,40 @@ typedef struct
 	float z;
 } vector3;
 
-__global__ void fill_noise_draws (std::complex<float>* noise_draws, int nbaselines, int ntimesamples, float* stdv, unsigned long long freq_idx, unsigned long long seed)
+class myComplex
 {
-	using namespace std::complex_literals;
+	public:
+		float real;
+		float imag;
+	__global__ myComplex(float real_, float imag_)
+	{
+		real = real_;
+		imag = imag_;
+	}
+	myComplex& operator+= (const myComplex& rhs)
+	{
+		real += rhs.real;
+		imag += rhs.imag;
+		return *this;
+	}
+};
 
+__global__ inline myComplex operator* (const float a, const myComplex b) {return myComplex(b.real*a, b.imag*a)};
+__global__ inline myComplex operator* (const myComplex b, const float a) {return myComplex(b.real*a, b.imag*a)};
+
+__device__ exp (myComplex x)
+{
+	return expf(x.real)*myComplex(sinf(x.imag),cosf(x.imag));
+}
+
+__global__ void fill_noise_draws (myComplex* noise_draws, int nbaselines, int ntimesamples, float* stdv, unsigned long long freq_idx, unsigned long long seed)
+{
 	int idx = threadIdx.x + blockIdx.x *32;
 	curandStateMRG32k3a_t state;
 	curand_init(seed, idx+freq_idx*nbaselines*ntimesamples, 0, &state);
 	if (idx < nbaselines*ntimesamples)
 	{
-		noise_draws[idx] = (curand_normal(&state)+curand_normal(&state)*1if)*stdv[idx/(ntimesamples*2)];
+		noise_draws[idx] = myComplex(curand_normal(&state), curand_normal(&state))*stdv[idx/(ntimesamples*2)];
 	}
 }
 
@@ -64,17 +87,15 @@ __device__ float B_sq (const float alpha, const float wavelength, const float D)
         return (2*j1f(alphaprime)/alphaprime) * (2*j1f(alphaprime)/alphaprime);
 }
 
-__global__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws, float* stdv,
+__global__ void dm_noise_sim (const myComplex<float>* visibility_noise_draws, float* stdv,
     const vector3* u, const vector3* baselines, int nbaselines, float wavelength,
     vector3 telescope_u, float dish_diameter, float deg_distance_to_count, int ntimesamples_full, int ntimesamples, float* noise_map)
-{
-	using namespace std::complex_literals;
-    
+{   
 	int pixelidx = threadIdx.x + blockIdx.x*PIXELS_PER_BLOCK;
     float pixelphi = atan2f(u[pixelidx].x, u[pixelidx].y);
     int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
     int t_initial = rough_time_placement-ntimesamples/2;
-    std::complex<float> sum = 0;
+    myComplex sum = 0;
     for (int i = 0; i < nbaselines; i++)
     {
     	float inv_cov = 1.0/(stdv[i]*stdv[i]);
@@ -83,10 +104,10 @@ __global__ void dm_noise_sim (const std::complex<float>* visibility_noise_draws,
             float delta_phi = (2*PI/ntimesamples_full)*t;
             vector3 u_rot = rotate(u[pixelidx], delta_phi);
             float Bsq = B_sq(angular_difference(u_rot, telescope_u), wavelength, dish_diameter);
-            sum += inv_cov*visibility_noise_draws[i*ntimesamples+t]*exp(-2*PI*1if/wavelength*dot(baselines[i],u_rot));
+            sum += inv_cov*visibility_noise_draws[i*ntimesamples+t]*exp(myComplex(0,-2*PI/wavelength*dot(baselines[i],u_rot)));
         }
     }
-    noise_map[pixelidx] = sum.real();
+    noise_map[pixelidx] = sum.real;
 }
 
 extern "C" {void dm_noise_sim_caller (float noise,
@@ -144,7 +165,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
     vector3* u_d[deviceCount];
     
 	float* padded_noise_map_d[deviceCount];
-	std::complex<float>* noise_draws[deviceCount];
+	myComplex* noise_draws[deviceCount];
 	vector3* a_d[deviceCount];
 	float* stdv_d[deviceCount];
 	for (int gpuId = 0; gpuId < deviceCount; gpuId++)
@@ -153,7 +174,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		cudaMalloc(&u_d[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId]);
 		cudaMemcpyAsync(u_d[gpuId], u + gpu_pixel_idx[gpuId], sizeof(vector3)*gpu_pixel_length[gpuId], cudaMemcpyHostToDevice);
 		cudaMalloc(&padded_noise_map_d[gpuId], sizeof(float)*gpu_pixel_length[gpuId]);
-		cudaMalloc(&noise_draws[gpuId], sizeof(std::complex<float>)*nbaselines*ntimesamples_full);
+		cudaMalloc(&noise_draws[gpuId], sizeof(myComplex)*nbaselines*ntimesamples_full);
 		cudaMalloc(&a_d[gpuId], sizeof(vector3)*nbaselines);
 		cudaMemcpyAsync(a_d[gpuId], a, sizeof(vector3)*nbaselines, cudaMemcpyHostToDevice);
 		cudaMalloc(&stdv_d[gpuId], sizeof(float)*nbaselines);
@@ -176,7 +197,7 @@ extern "C" {void dm_noise_sim_caller (float noise,
 		{
 			cudaSetDevice(gpuId);
 			int nblocks = gpu_pixel_length[gpuId]/PIXELS_PER_BLOCK;
-			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (static_cast<std::complex<float>*>(noise_draws[gpuId]), stdv_d[gpuId],
+			dm_noise_sim<<<nblocks,PIXELS_PER_BLOCK>>> (noise_draws[gpuId], stdv_d[gpuId],
     			u_d[gpuId], a_d[gpuId], nbaselines, wavelengths[l],
     			zenith_basis, dish_diameter, deg_distance_to_count, ntimesamples_full, ntimesamples, padded_noise_map_d[gpuId]);
 		}

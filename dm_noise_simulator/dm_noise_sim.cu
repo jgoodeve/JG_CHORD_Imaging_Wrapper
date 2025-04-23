@@ -96,7 +96,7 @@ __global__ void dm_noise_sim (const myComplex* visibility_noise_draws, float* st
     float pixelphi = atan2f(u[pixelidx].x, u[pixelidx].y);
     int rough_time_placement = pixelphi/(2*PI) * ntimesamples_full;
     int t_initial = rough_time_placement-ntimesamples/2;
-    myComplex sum(0,0);
+	myComplex sum(0,0);
     for (int i = 0; i < nbaselines; i++)
     {
     	float inv_cov = 1.0/(stdv[i]*stdv[i]);

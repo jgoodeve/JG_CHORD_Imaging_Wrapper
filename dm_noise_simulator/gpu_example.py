@@ -1,7 +1,6 @@
 import numpy as np
 import time
 import pickle
-import matplotlib.pyplot as plt
 
 from dm_noise_simulator_wrapper import dm_noise_simulator_wrapper_gpu
 from get_noise_distribution import not_autocorr_stdv
@@ -74,9 +73,10 @@ if __name__ == "__main__":
     L1 = 6.3
     L2 = 8.5
     baselines, baseline_counts = get_baseline_counts()
-    
+    baselines = baselines.astype(np.float32)
+
     nf = 32
-    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf)[::-1]
+    f = np.linspace(get_coarse(z_to_center(0.00))-nf*channel_width,get_coarse(z_to_center(0.00)),nf, dtype=np.float32)[::-1]
     wavelengths = sol*1e3/(f*1e6)
     
     base_theta = np.deg2rad(90-49.322)
@@ -91,15 +91,17 @@ if __name__ == "__main__":
     ang_resolution = 2 #deg
     deg_distance_to_count = 8
     ntimesamples = int(360/ang_resolution)
-    noise = not_autocorr_stdv(3600.0*24/ntimesamples) / 1000 #mJy
+    noise = not_autocorr_stdv(3600.0*24/ntimesamples) * 1e9 #1e9Jy
 
     #u = get_tan_plane_pixelvecs(nx,ny, base_theta, base_phi, extent1, extent2).reshape([nx*ny,3])
-    u = get_radec_pixelvecs (nx,ny, base_theta, base_phi, extent2, extent1)
+    u = get_radec_pixelvecs (nx,ny, base_theta, base_phi, extent2, extent1).astype(np.float32)
+    #u = u[0][np.newaxis]
     
     dirtymap = dm_noise_simulator_wrapper_gpu(noise, u, baselines, baseline_counts, wavelengths, chord_dec, dish_diameter, deg_distance_to_count, ntimesamples)
     
     t2 = time.time()
     print("Dirtymap noise simulator took", t2-t1, "seconds")
+    print("output:", dirtymap)
 
     dmDict = {
         "dirtymap": dirtymap,

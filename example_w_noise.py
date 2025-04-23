@@ -79,8 +79,8 @@ omega = 2*np.pi/(3600*24)
 if __name__ == "__main__":
     t1 = time.time()
     spectra_file = np.load("test_spectra1000.npz")
-    f = spectra_file["freq"].astype(np.float32)[:1024]
-    wavelengths = sol*1e3/(f*1e6)
+    f = spectra_file["freq"].astype(np.float32)[:10000-1025:-1]
+    wavelengths = sol/(f*1e6)
 
     chord_dec = 49.322
     dish_diameter = 6 #m
@@ -88,6 +88,12 @@ if __name__ == "__main__":
     m2 = 24 #ns
     L1 = 6.3
     L2 = 8.5
+    ang_resolution = 2 #deg
+    deg_distance_to_count = 8
+    ntimesamples = int(360/ang_resolution)
+    baselines, baseline_counts = get_baseline_counts()
+    baselines = baselines.astype(np.float32)
+    noise = not_autocorr_stdv(3600.0*24/ntimesamples)/1000 #mJy
     seed = 1234
 
     base_theta = np.deg2rad(90-49.322)
@@ -97,13 +103,13 @@ if __name__ == "__main__":
     extent1 = np.deg2rad(24)
     extent2 = np.deg2rad(6)
 
-    spectra = spectra_file["spectra"][:,:1024]
+    spectra = spectra_file["spectra"][:,:10000-1025:-1] #mJy
     source_us = generate_locations (spectra.shape[0], base_theta, base_phi, extent2, extent1, seed)
 
     chord_thetas = np.asarray([np.deg2rad(90-chord_dec)], dtype=np.float32)
     cp = chordParams(thetas = unpackArraytoStruct(chord_thetas),
                     initial_phi_offset = np.deg2rad(10),
-                     m1=m1, m2=m2, L1=L1, L2=L2, chord_zenith_dec = 49.322, D = dish_diameter, noise = 6.2522,
+                     m1=m1, m2=m2, L1=L1, L2=L2, chord_zenith_dec = 49.322, D = dish_diameter, noise = noise,
                     delta_tau = np.deg2rad(0.5)/omega, time_samples=41)
 
     u = get_radec_pixelvecs(nx, ny, base_theta, base_phi, extent2, extent1).astype(np.float32)
@@ -111,18 +117,12 @@ if __name__ == "__main__":
     source_dirtymap = dirtymap_simulator_wrapper (u, wavelengths, source_us, spectra, 0.01, cp)
     t2 = time.time()
     print("Source simulator took", t2-t1, "seconds")
-
-    ang_resolution = 2 #deg
-    deg_distance_to_count = 8
-    ntimesamples = int(360/ang_resolution)
-    noise = not_autocorr_stdv(3600.0*24/ntimesamples) /1000 #mJy
-    baselines, baseline_counts = get_baseline_counts()
-    baselines = baselines.astype(np.float32)
+    print("Max of source map:", np.max(source_dirtymap),"1/mJy")
 
     noise_dirtymap = dm_noise_simulator_wrapper_gpu(noise, u, baselines, baseline_counts, wavelengths, chord_dec, dish_diameter, deg_distance_to_count, ntimesamples, seed)
-
     t3 = time.time()
     print("Noise simulator took", t3-t2, "seconds")
+    print("Max of noise map:", np.max(noise_dirtymap),"1/mJy")
 
     combined_dirtymap = source_dirtymap + noise_dirtymap
 

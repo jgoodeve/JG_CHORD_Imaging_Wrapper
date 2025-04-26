@@ -78,8 +78,8 @@ omega = 2*np.pi/(3600*24)
 
 if __name__ == "__main__":
     t1 = time.time()
-    spectra_file = np.load("test_spectra1000.npz")
-    f = spectra_file["freq"].astype(np.float32)[:10000-1025:-1]
+    spectra_file = np.load("Spectra_96859gals_432fchans_1340_1420.npz")
+    f = spectra_file["freq"].astype(np.float32)
     wavelengths = sol/(f*1e6)
 
     chord_dec = 49.322
@@ -103,7 +103,10 @@ if __name__ == "__main__":
     extent1 = np.deg2rad(24)
     extent2 = np.deg2rad(6)
 
-    spectra = spectra_file["spectra"][:,:10000-1025:-1] #mJy
+    spectra = spectra_file["spectra"] #mJy
+	#in my data there's a really really bright galaxy, so we'll simulate "saturation by just cutting off the brightness"
+    spectra[np.nonzero(spectra > 1)] = 1.0
+
     source_us = generate_locations (spectra.shape[0], base_theta, base_phi, extent2, extent1, seed)
 
     chord_thetas = np.asarray([np.deg2rad(90-chord_dec)], dtype=np.float32)
@@ -130,7 +133,11 @@ if __name__ == "__main__":
         "dirtymap": combined_dirtymap,
         "freq": f,
         "nx": nx,
-        "ny": ny
+        "ny": ny,
+		"baseRA": np.rad2deg(base_phi),
+		"baseDec": 90-np.rad2deg(base_theta),
+		"extentRA": np.rad2deg(extent1),
+		"extentDec": np.rad2deg(extent2)
     }
 
     dmfile = open("dirtymap.pickle", "wb")

@@ -218,7 +218,7 @@ def make_some_noise(M,N,L1,L2,lat,dec,N_times,dnu,dt,SEFD,eta,freq,imsize,cellsi
     s0 = np.array([np.cos(dec*np.pi/180),0,np.sin(dec*np.pi/180)])
     
     antennae = Antenna_positions_cartbasis(antennae,0,lat)
-    pos,magni = Visibility_noise(antennaeA_beam,B_beam = rev.recover_net_beam(u, centre_phi_RA_deg, initial_phi_offset, dphi, N_times, frequencies, survey_dec, antenna_diam = ant_diam),s0,M,N,dnu=dnu,dt=dt,SEFD = SEFD,eta = eta,freq = freq)
+    pos,magni = Visibility_noise(antennae,s0,M,N,dnu=dnu,dt=dt,SEFD = SEFD,eta = eta,freq = freq)
     maggy = grid(pos,magni,imsize,cellsize_deg*60)
     noise = gen_noise_image(maggy)
 

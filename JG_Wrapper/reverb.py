@@ -229,16 +229,18 @@ def normalize(dirtymap,noise,A_beam,frequencies,M,N,beamthresh = 0.25):
     dirtymap/=M**2
     dirtymap/=N**2 ## necessary for normalization
 
+    beam = A_beam.copy()
+
     for i in range(len(frequencies)):
 
         beammax = np.max(A_beam[:,:,i])
         noise[:,:,i] *= np.sqrt(A_beam[:,:,i])/beammax
-        A_beam[:,:,i] /= beammax
+        beam[:,:,i] /= beammax
         dirtymap[:,:,i] /= beammax
         (noise[:,:,i])[A_beam[:,:,i]<beamthresh] = np.nan
         (dirtymap[:,:,i])[A_beam[:,:,i]<beamthresh] = np.nan
 
-    return dirtymap,noise,A_beam
+    return dirtymap,noise,beam
 
 
 def sightread(npzfile,noisefile = None,beamfile = None):

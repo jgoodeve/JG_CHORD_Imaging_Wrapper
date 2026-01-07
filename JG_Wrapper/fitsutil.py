@@ -52,7 +52,6 @@ def writetofits(filename,data,wcs,overwrite = False):
     be (RA, Dec, Freq) or (RA, Dec). This axis order must be followed
     or the WCS will not correspond correctly.
 
-    then this code should work!
     '''
 
     header = wcs.to_header()

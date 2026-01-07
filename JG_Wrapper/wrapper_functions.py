@@ -8,11 +8,17 @@ from astropy.coordinates import SkyCoord
 import astropy.units as units
 from matplotlib import pyplot as plt
 from scipy.interpolate import griddata
+from scipy import interpolate as interp
 from scipy.linalg import ishermitian
 from scipy.special import j1
+from scipy.integrate import quad
+import pickle
 
 
 c = 3e8
+
+with open('JG_Wrapper/Backgroundfiles/Matthewsinterp2021.pkl', 'rb') as f:
+    Matthewsdist = pickle.load(f)
 
 dms_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__),"dms_fixpoint.so"))
 cuda_dirtymap_function = dms_lib.dirtymap_caller
@@ -71,7 +77,7 @@ def normalize(dirtymap,noise,A_beam,B_beam,frequencies,M,N,beamthresh = 0.25):
     for i in range(len(frequencies)):
 
         beammax = np.max(A_beam[:,:,i])
-        noise[:,:,i] *= np.sqrt(B_beam[:,:,i])/beammax
+        noise[:,:,i] *= np.sqrt(A_beam[:,:,i])/beammax
         beam[:,:,i] /= beammax
         dirtymap[:,:,i] /= beammax
         (noise[:,:,i])[A_beam[:,:,i]<beamthresh] = np.nan
@@ -245,7 +251,7 @@ def get_spectra(frequencies,F,s):
 
     return spectra
 
-def assign_variability(ListOrNumber, bins, probs, varlength = 300):
+def assign_variability(ListOrNumber, bins, probs, varlist):
 
     if isinstance(ListOrNumber,int):
         length = ListOrNumber         #### this chunk finds the number of variabilities and indices to generate
@@ -268,9 +274,9 @@ def assign_variability(ListOrNumber, bins, probs, varlength = 300):
 
     variability_fractions = np.array(outcomes)
 
-    variability_indices = np.random.randint(0,varlength,length)
+    variability_indices = np.random.randint(0,len(varlist),length)
 
-    variability_starts = np.random.randint(1,7300,length)
+    variability_starts = np.random.randint(1,int(len(varlist[0])/2),length)
 
     return variability_indices,variability_fractions,variability_starts
 
@@ -353,14 +359,64 @@ def gen_faint_background(density_coeff,density_index,F1_mJy,F2_mJy,phi1,phi2,the
 
     return u,spectra
 
-def apply_variability(spectra,T_in_days,varlib,inds,starts,fracs):
+def apply_variability(spectra,varlib,inds,starts,fracs):
 
     new_spectra = spectra.copy()
 
-    for i in range(len(spectra)):
-
-        tseries = np.roll(varlib[inds[i]],starts[i])
-
-        new_spectra[i] *= (1+fracs[i]*varlib[inds[i]][T_in_days])
+    for i in range(len(spectra[0])):
+        tseries = (np.roll(varlib[inds[i]],-starts[i]))
+        tseries = tseries[:int(len(tseries)/2)]
+        for j in range(len(spectra[0,0])):
+            new_spectra[:,i,j] = spectra[:,i,j]*(1+fracs[i]*tseries)
 
     return new_spectra
+
+def Matthews2021dens(FmJy):
+    return 10**interp.splev(np.log10(FmJy),Matthewsdist)
+
+def get_density_Matthews(F1_mJy,F2_mJy):
+
+    return quad(Matthews2021dens,F1_mJy,F2_mJy)[0]
+
+def gen_faint_background_Matthews(F1_mJy,F2_mJy,phi1,phi2,theta1,theta2,frequencies):
+
+    density = get_density_Matthews(F1_mJy,F2_mJy) ## per degree squared
+    
+    omega = (180/np.pi)**2*(np.deg2rad(phi2)-np.deg2rad(phi1))*(np.sin(np.deg2rad(theta2))-np.sin(np.deg2rad(theta1))) ## square degrees
+    
+    N = int(omega*density)
+    
+    phi = []
+    theta = []
+    F = []
+    
+    while len(phi) < N:
+            
+        phis = phi1+(phi2-phi1)*np.random.rand(N)
+        thetas = theta1+(theta2-theta1)*np.random.rand(N)
+        costhetas = np.cos(np.deg2rad(thetas))
+        costhetas_norm = costhetas/np.max(costhetas)
+        condition = np.random.rand(N) < costhetas_norm
+        phis_inc = phis[condition]
+        thetas_inc = thetas[condition]
+        phi += list(phis_inc)
+        theta += list(thetas_inc)
+    
+    while len(F) < N:
+    
+        Flux = F1_mJy+(F2_mJy-F1_mJy)*np.random.rand(N)
+        pdf = Matthews2021dens(Flux)
+        pdf_norm = pdf / np.max(pdf)
+        condition = np.random.rand(N) < pdf_norm
+        Flux_inc = Flux[condition]/1000 ## divide by 1000 because we generated using mJy
+        F += list(Flux_inc)
+    
+    dec = np.array(theta[:N])
+    ra = np.array(phi[:N])
+    F = np.array(F[:N])
+    s = gen_spectral_indices(N)
+
+    u = u_vec(ra,dec)
+    spectra = get_spectra(frequencies,F,s)
+
+    return u,spectra
